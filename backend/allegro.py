@@ -18,9 +18,9 @@ def get_access_token():
     auth = (CLIENT_ID, CLIENT_SECRET)
     headers = {'Content-Type': 'application/x-www-form-urlencoded'}
     data = {'grant_type': 'client_credentials'}
-    
+
     response = requests.post(AUTH_URL, auth=auth, headers=headers, data=data)
-    
+
     if response.status_code == 200:
         return response.json()['access_token']
     else:
@@ -34,54 +34,62 @@ def search_allegro(query, limit=3):
     access_token = get_access_token()
     if not access_token:
         return []
-    
+
     # Set up request
     headers = {
         'Authorization': f'Bearer {access_token}',
         'Accept': 'application/vnd.allegro.public.v1+json'
     }
-    
+
     params = {
         'phrase': query,
         'limit': limit,
         'sort': '-relevance'
     }
-    
+
     try:
         response = requests.get(SEARCH_URL, headers=headers, params=params)
-        
+
         if response.status_code == 200:
             data = response.json()
             results = []
-            
+
             for item in data.get('items', {}).get('regular', [])[:limit]:
                 offer = item.get('offer', {})
-                
+
                 # Extract product details
                 name = offer.get('name', 'No name')
                 price_data = offer.get('sellingMode', {}).get('price', {})
                 price = f"{price_data.get('amount', '0')} {price_data.get('currency', 'PLN')}"
-                
+
                 # Get image URL
                 images = offer.get('images', [])
                 image_url = images[0].get('url') if images else ''
-                
+
                 # Get product URL
                 product_url = offer.get('url', '')
-                
+
+                # Get description - use name and any available description from the API
+                description = name
+                if 'description' in offer:
+                    api_description = offer.get('description', {}).get('summary', '')
+                    if api_description:
+                        description = api_description
+
                 results.append({
                     'name': name,
                     'price': price,
                     'image': image_url,
-                    'url': product_url
+                    'url': product_url,
+                    'description': description
                 })
-            
+
             return results
         else:
             print(f"Error searching Allegro: {response.status_code}")
             print(response.text)
             return []
-    
+
     except Exception as e:
         print(f"Exception during Allegro search: {str(e)}")
         return []

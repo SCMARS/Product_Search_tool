@@ -1,0 +1,34 @@
+# Example curl command for AliExpress API via RapidAPI
+# Replace YOUR_RAPIDAPI_KEY with your actual RapidAPI key
+
+# Search for "iphone 16 pro max" products
+curl --request GET \
+  --url 'https://aliexpress-datahub.p.rapidapi.com/products/search?keywords=iphone%2016%20pro%20max&page=1&sort=best_match' \
+  --header 'X-RapidAPI-Key: YOUR_RAPIDAPI_KEY' \
+  --header 'X-RapidAPI-Host: aliexpress-datahub.p.rapidapi.com'
+
+# The same request can be used in Python with the requests library:
+'''python
+import requests
+
+url = "https://aliexpress-datahub.p.rapidapi.com/products/search"
+
+querystring = {
+    "keywords": "iphone 16 pro max",
+    "page": "1",
+    "sort": "best_match"
+}
+
+headers = {
+    "X-RapidAPI-Key": "YOUR_RAPIDAPI_KEY",
+    "X-RapidAPI-Host": "aliexpress-datahub.p.rapidapi.com"
+}
+
+response = requests.get(url, headers=headers, params=querystring)
+
+if response.status_code == 200:
+    data = response.json()
+    # Process the data here
+else:
+    print(f"Request failed with status code: {response.status_code}")
+'''

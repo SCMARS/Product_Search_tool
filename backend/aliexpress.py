@@ -52,12 +52,22 @@ def search_aliexpress(query, limit=3):
                     if product_url and not product_url.startswith("http"):
                         product_url = f"https:{product_url}"
 
+                    # Get description - use name as default
+                    description = name
+
+                    # Try to get a better description from the API response
+                    if "description" in product:
+                        api_description = product.get("description", "")
+                        if api_description:
+                            description = api_description
+
                     # Add to results
                     results.append({
                         "name": name,
                         "price": price,
                         "image": image_url,
-                        "url": product_url
+                        "url": product_url,
+                        "description": description
                     })
 
                 except Exception as e:
