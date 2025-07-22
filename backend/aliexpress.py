@@ -30,38 +30,37 @@ def search_aliexpress(query, limit=3):
         if response.status_code == 200:
             data = response.json()
 
-            # Extract product information from the response
-            # The exact structure depends on the API response format
+
             products = data.get("items", [])
 
-            # Process only the first 'limit' number of products
+
             for product in products[:limit]:
                 try:
-                    # Extract product details based on the API response structure
+          
                     name = product.get("title", "No name")
 
-                    # Format price
+
                     price_data = product.get("price", {})
                     price = f"US ${price_data.get('value', 'N/A')}" if price_data else "Price not available"
 
-                    # Get image URL
+
                     image_url = product.get("image", {}).get("imgUrl", "")
 
-                    # Get product URL
+
                     product_url = product.get("productUrl", "")
                     if product_url and not product_url.startswith("http"):
                         product_url = f"https:{product_url}"
 
-                    # Get description - use name as default
+
                     description = name
 
-                    # Try to get a better description from the API response
+
                     if "description" in product:
                         api_description = product.get("description", "")
                         if api_description:
                             description = api_description
 
-                    # Add to results
+                   
                     results.append({
                         "name": name,
                         "price": price,

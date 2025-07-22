@@ -21,7 +21,7 @@ def search_amazon(query, limit=3):
             # Product selector
             products = page.query_selector_all("div[data-asin][data-component-type='s-search-result']")
 
-            # Filter products to only include those with valid ASIN
+
             valid_products = [p for p in products if p.get_attribute("data-asin") and p.get_attribute("data-asin") != ""]
 
             count = 0
@@ -29,7 +29,7 @@ def search_amazon(query, limit=3):
                 if count >= limit:
                     break
 
-                # Get ASIN
+
                 asin = product.get_attribute("data-asin")
 
                 # Check if title exists - try multiple selectors
@@ -47,17 +47,15 @@ def search_amazon(query, limit=3):
                 img_elem = product.query_selector("img.s-image")
                 image_url = img_elem.get_attribute("src") if img_elem else ""
 
-                # Use ASIN to construct the product URL directly
-                # This is more reliable than trying to extract the URL from the page
+
                 if asin:
                     product_url = f"https://www.amazon.de/dp/{asin}"
                 else:
                     product_url = ""
 
-                # Get product description - initially use the name as description
                 description = name
 
-                # Try to get additional description from the product page
+
                 try:
                     # Open product page in a new tab
                     product_page = context.new_page()

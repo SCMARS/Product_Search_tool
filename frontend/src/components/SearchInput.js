@@ -1,19 +1,77 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
+import axios from 'axios';
 
 const SearchInput = ({ query, setQuery, loading }) => {
   const fileInputRef = useRef(null);
+  const [imageLoading, setImageLoading] = useState(false);
+  const [imageError, setImageError] = useState(null);
 
   const triggerFileInput = () => {
     // Programmatically click the hidden file input
     fileInputRef.current.click();
   };
 
-  const handleFileUpload = (event) => {
+  const handleFileUpload = async (event) => {
     const file = event.target.files[0];
     if (file) {
-      // Here you can handle the file upload
       console.log('File uploaded:', file);
-      // You might want to add additional functionality here
+
+      setImageLoading(true);
+      setImageError(null);
+
+      // Create FormData object to send the file
+      const formData = new FormData();
+      formData.append('image', file);
+
+      try {
+        // Send the image to the backend for analysis
+        const response = await axios.post('http://127.0.0.1:5001/api/analyze-image', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+
+        if (response.data.success) {
+          // Set the query to the analysis result
+          setQuery(response.data.analysis);
+        } else {
+          setImageError(response.data.error || 'Failed to analyze image');
+        }
+      } catch (error) {
+        console.error('Error analyzing image:', error);
+
+        // Extract the error message from the response if available
+        let errorMessage = 'Error analyzing image. Please try again.';
+
+        if (error.response && error.response.data) {
+          errorMessage = error.response.data.error || errorMessage;
+        }
+
+        // Handle specific HTTP status codes
+        if (error.response) {
+          switch (error.response.status) {
+            case 400:
+              // Bad request - likely an issue with the image
+              console.log('Bad request error:', error.response.data);
+              break;
+            case 429:
+              // Rate limit exceeded
+              errorMessage = 'Rate limit exceeded. Please try again later.';
+              break;
+            case 504:
+              // Gateway timeout
+              errorMessage = 'The request timed out. Please try again later.';
+              break;
+            default:
+              // Other errors
+              console.log(`Server error (${error.response.status}):`, error.response.data);
+          }
+        }
+
+        setImageError(errorMessage);
+      } finally {
+        setImageLoading(false);
+      }
     }
   };
 
@@ -60,6 +118,19 @@ const SearchInput = ({ query, setQuery, loading }) => {
       <p className="mt-2 text-sm text-gray-500 text-center">
         Search across Allegro, Amazon, and Aliexpress
       </p>
+
+      {imageLoading && (
+        <div className="mt-2 flex justify-center">
+          <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-green-500"></div>
+          <span className="ml-2 text-sm text-green-600">Analyzing image...</span>
+        </div>
+      )}
+
+      {imageError && (
+        <div className="mt-2 p-2 bg-red-100 text-red-700 rounded-md text-sm text-center">
+          {imageError}
+        </div>
+      )}
     </div>
   );
 };

@@ -12,7 +12,7 @@ function App() {
   // Автоматический поиск с задержкой (debounce)
   useEffect(() => {
     const delayedSearch = setTimeout(() => {
-      if (query.trim().length > 2) { // Поиск только если больше 2 символов
+      if (query.trim().length > 4) { // Поиск только если больше 2 символов
         performSearch();
       } else {
         setResults(null); // Очистить результаты если запрос короткий
@@ -29,7 +29,7 @@ function App() {
     setError(null);
 
     try {
-      // Здесь изменён URL на /api/search
+   //api/search
       const response = await axios.post('http://127.0.0.1:5001/api/search', {
         query: query.trim()
       }, {

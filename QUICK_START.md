@@ -39,7 +39,7 @@ This script will automatically set up and start both the backend and frontend se
    ```
    flask run
    ```
-   The backend will be available at http://localhost:5000
+   The backend will be available at http://localhost:5001
 
 ## Running the Frontend
 

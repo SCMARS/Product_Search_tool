@@ -21,12 +21,17 @@ def get_access_token():
 
     response = requests.post(AUTH_URL, auth=auth, headers=headers, data=data)
 
+
+
+
     if response.status_code == 200:
         return response.json()['access_token']
     else:
         print(f"Error getting access token: {response.status_code}")
         print(response.text)
         return None
+
+
 
 def search_allegro(query, limit=3):
     """Search for products on Allegro"""

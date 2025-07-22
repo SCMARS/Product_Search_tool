@@ -42,15 +42,31 @@ const ResultCard = ({ product }) => {
       }, {
         headers: {
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 30000 // 30 seconds timeout
       });
 
       setGeneratedImage(response.data.image_url);
     } catch (err) {
       console.error('Error generating AI image:', err);
-      if (err.response && err.response.data && err.response.data.error) {
-        setImageError(err.response.data.error);
+
+      // Handle different types of errors
+      if (err.response) {
+        // The server responded with a status code outside the 2xx range
+        if (err.response.data && err.response.data.error) {
+          setImageError(err.response.data.error);
+        } else {
+          setImageError(`Server error: ${err.response.status}`);
+        }
+      } else if (err.request) {
+        // The request was made but no response was received
+        if (err.code === 'ECONNABORTED') {
+          setImageError('Request timed out. The server took too long to respond.');
+        } else {
+          setImageError('No response from server. Please check your connection.');
+        }
       } else {
+        // Something happened in setting up the request
         setImageError('Failed to generate image. Please try again later.');
       }
     } finally {
