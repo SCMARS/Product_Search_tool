@@ -51,7 +51,7 @@ playwright install
 
 # Start Flask server in the background
 echo "Starting Flask server..."
-flask run &
+flask run --port=5001 &
 FLASK_PID=$!
 
 # Wait for Flask to start
@@ -77,7 +77,7 @@ REACT_PID=$!
 # Wait for user to press Ctrl+C
 echo
 echo "Application is running!"
-echo "- Backend: http://localhost:5000"
+echo "- Backend: http://localhost:5001"
 echo "- Frontend: http://localhost:3000"
 echo
 echo "Press Ctrl+C to stop the application"
