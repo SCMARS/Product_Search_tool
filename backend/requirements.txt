@@ -6,3 +6,4 @@ python-dotenv==0.19.1
 playwright==1.17.0
 pyee==8.1.0
 Pillow==10.2.0
+pandas==2.2.0

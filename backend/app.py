@@ -5,6 +5,10 @@ import os
 import requests
 import base64
 import io
+import json
+import time
+import threading
+import pandas as pd
 from PIL import Image
 from dotenv import load_dotenv
 from allegro import search_allegro
@@ -418,6 +422,162 @@ def analyze_image():
             return jsonify({'error': 'The request timed out. Please try again later.'}), 504
         else:
             return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
+
+def process_csv(df):
+    """
+    Process a DataFrame containing product names.
+    For each product, search on Amazon, Allegro, and AliExpress.
+    Save results to results.json.
+
+    Args:
+        df (pandas.DataFrame): DataFrame with a 'product' column
+    """
+    results = []
+
+    for index, row in df.iterrows():
+        product_name = row['product']
+        product_result = {"product": product_name}
+
+        try:
+            # Search Amazon
+            try:
+                amazon_results = search_amazon(product_name, limit=1)
+                if amazon_results:
+                    product_result["amazon"] = {
+                        "name": amazon_results[0]["name"],
+                        "price": amazon_results[0]["price"],
+                        "url": amazon_results[0]["url"]
+                    }
+            except Exception as e:
+                product_result["error"] = f"Timeout while fetching amazon: {str(e)}"
+                print(f"Error searching Amazon for {product_name}: {e}")
+
+            # Search Allegro
+            try:
+                allegro_results = search_allegro(product_name, limit=1)
+                if allegro_results:
+                    product_result["allegro"] = {
+                        "name": allegro_results[0]["name"],
+                        "price": allegro_results[0]["price"],
+                        "url": allegro_results[0]["url"]
+                    }
+            except Exception as e:
+                if "error" not in product_result:
+                    product_result["error"] = f"Timeout while fetching allegro: {str(e)}"
+                print(f"Error searching Allegro for {product_name}: {e}")
+
+            # Search AliExpress
+            try:
+                aliexpress_results = search_aliexpress(product_name, limit=1)
+                if aliexpress_results:
+                    product_result["aliexpress"] = {
+                        "name": aliexpress_results[0]["name"],
+                        "price": aliexpress_results[0]["price"],
+                        "url": aliexpress_results[0]["url"]
+                    }
+            except Exception as e:
+                if "error" not in product_result:
+                    product_result["error"] = f"Timeout while fetching aliexpress: {str(e)}"
+                print(f"Error searching AliExpress for {product_name}: {e}")
+
+        except Exception as e:
+            product_result["error"] = f"Error processing product: {str(e)}"
+            print(f"Error processing product {product_name}: {e}")
+
+        results.append(product_result)
+
+        # Sleep to avoid rate limiting
+        time.sleep(0.5)
+
+    # Save results to results.json
+    try:
+        with open('results.json', 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+        print(f"Results saved to results.json ({len(results)} products processed)")
+    except Exception as e:
+        print(f"Error saving results to file: {e}")
+
+@app.route('/api/upload-csv', methods=['POST'])
+def upload_csv():
+    """
+    Endpoint to upload and process a CSV file containing product names.
+
+    The CSV file must have a 'product' column.
+    Processing is done in a background thread.
+
+    Returns:
+        JSON response indicating success or error
+    """
+    # Check if file is present in the request
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+
+    file = request.files['file']
+
+    # Check if the file is empty
+    if file.filename == '':
+        return jsonify({'error': 'Empty file provided'}), 400
+
+    # Check if the file is a CSV
+    if not file.filename.lower().endswith('.csv'):
+        return jsonify({'error': 'File must be a CSV'}), 400
+
+    try:
+        # Read the CSV file
+        df = pd.read_csv(file)
+
+        # Check if either 'product' or 'product_name' column exists
+        if 'product' not in df.columns and 'product_name' not in df.columns:
+            return jsonify({'error': 'CSV file must contain either a "product" or "product_name" column'}), 400
+
+        # If only product_name exists, rename it to product for consistency
+        if 'product_name' in df.columns and 'product' not in df.columns:
+            df = df.rename(columns={'product_name': 'product'})
+
+        # Start background processing
+        thread = threading.Thread(target=process_csv, args=(df,))
+        thread.daemon = True
+        thread.start()
+
+        return jsonify({
+            'success': True,
+            'message': f'Processing {len(df)} products in the background',
+            'products_count': len(df)
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'Error processing CSV file: {str(e)}'}), 500
+
+@app.route('/api/csv-results', methods=['GET'])
+def get_csv_results():
+    """
+    Endpoint to retrieve the results of CSV processing.
+
+    Returns:
+        JSON response containing the results from results.json
+    """
+    try:
+        # Check if results.json exists
+        if not os.path.exists('results.json'):
+            return jsonify({
+                'success': False,
+                'message': 'No results available. Please upload a CSV file first.'
+            }), 404
+
+        # Read the results.json file
+        with open('results.json', 'r', encoding='utf-8') as f:
+            results = json.load(f)
+
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error retrieving results: {str(e)}'
+        }), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='127.0.0.1', port=5001)
