@@ -11,9 +11,9 @@ import threading
 import pandas as pd
 from PIL import Image
 from dotenv import load_dotenv
-from allegro import search_allegro
+from allegro import search_allegro_improved as search_allegro
 from amazon import search_amazon
-from aliexpress import search_aliexpress
+#from aliexpress import search
 
 # Load environment variables
 load_dotenv()
@@ -36,7 +36,7 @@ def search():
     with concurrent.futures.ThreadPoolExecutor() as executor:
         allegro_future = executor.submit(search_allegro, query)
         amazon_future = executor.submit(search_amazon, query)
-        aliexpress_future = executor.submit(search_aliexpress, query)
+        aliexpress_future = executor.submit(search, query)
 
         try:
             allegro_results = allegro_future.result()
@@ -468,7 +468,7 @@ def process_csv(df):
 
             # Search AliExpress
             try:
-                aliexpress_results = search_aliexpress(product_name, limit=1)
+                aliexpress_results = search(product_name, limit=1)
                 if aliexpress_results:
                     product_result["aliexpress"] = {
                         "name": aliexpress_results[0]["name"],
