@@ -1,0 +1,67 @@
+[
+  {
+    "product": "iPhone 13",
+    "amazon": {
+      "name": "Apple Silikon Case mit MagSafe (für iPhone 13) - Abyssblau",
+      "price": "34,90 €",
+      "url": "https://www.amazon.de/dp/B09G8PZ45Q"
+    },
+    "aliexpress": {
+      "name": "iPhone 13 Mini 128GB Starlight Unlocked (Refurbished-Good)",
+      "price": 282.14,
+      "url": "https://www.aliexpress.com/item/3256809060757878.html"
+    }
+  },
+  {
+    "product": "Samsung Galaxy S22",
+    "amazon": {
+      "name": "High Power Ersatzakku kompatibel mit Samsung Galaxy S22 5G SM-S901 EB-BS901ABY | GLK-Technologies® Battery | accu | 3900 mAh Akku | inkl. Profi Werkzeug Set Kit NUE 2025 BJ",
+      "price": "Price not available",
+      "url": "https://www.amazon.de/dp/B0DB1T933B"
+    },
+    "aliexpress": {
+      "name": "Samsung Galaxy S22 Ultra 5G S908U1 6.8\" AMOLED 8/12GB 12/128/256/512GB ROM Snapdragon NFC S Pen Original Unlocked Cellphone",
+      "price": 442.56,
+      "url": "https://www.aliexpress.com/item/3256804788284181.html"
+    }
+  },
+  {
+    "product": "MacBook Air M2",
+    "amazon": {
+      "name": "HODO USB C Hub Adapter für MacBook Pro Air, Mac Zubehör 8 in 2 mit 4K HDMI,Thunderbolt 3 Port, USB 3.0/2.0, SD und TF Kartensteckplatz für M3 M2 M1 2024 2023 2022 2021",
+      "price": "Price not available",
+      "url": "https://www.amazon.de/dp/B09BF7T1Z2"
+    },
+    "aliexpress": {
+      "name": "Dormin Laptop Sleeve Bag Case For Apple Macbook Air Pro 13 M1 M2 2020 Notebook Sleeve Bag For ASUS 11 12 13.3 14 15 15.6 16 Case",
+      "price": 0.99,
+      "url": "https://www.aliexpress.com/item/3256808597392119.html"
+    }
+  },
+  {
+    "product": "Sony WH-1000XM5",
+    "amazon": {
+      "name": "GO SOLID! Ladegerät kompatibel mit Sony WH-1000XM3, WH-1000XM4, WH-1000XM5",
+      "price": "Price not available",
+      "url": "https://www.amazon.de/dp/B0BQN7HHQD"
+    },
+    "aliexpress": {
+      "name": "100% Original Sony WH-1000XM5 Wireless Noise Canceling Headphones Bluetooth Earphones 30-Hour Battery Life Headset",
+      "price": 297,
+      "url": "https://www.aliexpress.com/item/3256808296219681.html"
+    }
+  },
+  {
+    "product": "Xbox Series X",
+    "amazon": {
+      "name": "Snakebyte Gamepad Pro X schwarz - kabelgebundener Xbox Series X|S & PC Controller, Hall-Effect Sensoren, Audio-Panel, Zusatztasten, Trigger-Stops",
+      "price": "Price not available",
+      "url": "https://www.amazon.de/dp/B0CH3LR5J1"
+    },
+    "aliexpress": {
+      "name": "Microsoft Xbox Series X 1TB Unlocked Version Video Game Consoles XBOX X Wireless Controller Console",
+      "price": 512.15,
+      "url": "https://www.aliexpress.com/item/3256807543648978.html"
+    }
+  }
+]

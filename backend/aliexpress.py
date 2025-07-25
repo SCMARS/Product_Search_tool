@@ -1,93 +1,116 @@
-import requests
 import os
+import http.client
+import json
+from typing import List, Dict, Any
+from dotenv import load_dotenv
+import logging
+from urllib.parse import quote_plus
 
-def search_aliexpress(query, limit=3):
-    """Search for products on AliExpress using RapidAPI"""
-    results = []
+load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Новый ключ для Aliexpress DataHub API
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY") or "067bf13bb7msh29bf8d815f8744bp158f84jsnd4928e52ec6e"
+API_HOST = "aliexpress-datahub.p.rapidapi.com"
+
+def search_aliexpress(query: str, page: int = 1, limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    Поиск товаров на AliExpress через Aliexpress DataHub API
+    """
+    if not query or not query.strip():
+        logger.warning("Пустой поисковый запрос")
+        return []
 
     try:
-        # RapidAPI endpoint for AliExpress
-        url = "https://aliexpress-datahub.p.rapidapi.com/products/search"
+        # Создаем соединение
+        conn = http.client.HTTPSConnection(API_HOST)
 
-        # Query parameters
-        querystring = {
-            "keywords": query,
-            "page": "1",
-            "sort": "best_match"
-        }
-
-        # Headers with RapidAPI key and host
-        # In a production environment, you should store the API key in environment variables
+        # Формируем заголовки
         headers = {
-            "X-RapidAPI-Key": os.environ.get("RAPIDAPI_KEY", "YOUR_RAPIDAPI_KEY_HERE"),
-            "X-RapidAPI-Host": "aliexpress-datahub.p.rapidapi.com"
+            'x-rapidapi-key': RAPIDAPI_KEY,
+            'x-rapidapi-host': API_HOST
         }
 
-        # Make the API request
-        response = requests.get(url, headers=headers, params=querystring)
+        # URL encode запрос для избежания проблем с пробелами
+        encoded_query = quote_plus(query.strip())
 
-        # Check if the request was successful
-        if response.status_code == 200:
-            data = response.json()
+        # Формируем URL с параметрами
+        url = f"/item_search_2?q={encoded_query}&page={page}&sort=default"
 
+        # Выполняем запрос
+        conn.request("GET", url, headers=headers)
 
-            products = data.get("items", [])
+        # Получаем ответ
+        res = conn.getresponse()
+        data = res.read()
 
+        logger.info(f"AliExpress DataHub API response status: {res.status}")
 
-            for product in products[:limit]:
-                try:
-          
-                    name = product.get("title", "No name")
+        if res.status == 200:
+            # Парсим JSON ответ
+            response_data = json.loads(data.decode("utf-8"))
 
+            # Извлекаем товары из ответа (структура: result.resultList)
+            products = []
+            if isinstance(response_data, dict) and 'result' in response_data:
+                result = response_data['result']
+                if isinstance(result, dict) and 'resultList' in result:
+                    products = result['resultList']
+                elif isinstance(result, dict) and 'data' in result:
+                    products = result['data']
+                elif isinstance(result, list):
+                    products = result
+            elif isinstance(response_data, list):
+                products = response_data
 
-                    price_data = product.get("price", {})
-                    price = f"US ${price_data.get('value', 'N/A')}" if price_data else "Price not available"
+            # Преобразуем в нужный формат
+            formatted_products = []
+            if isinstance(products, list):
+                for product in products[:limit]:
+                    if isinstance(product, dict) and 'item' in product:
+                        item = product['item']
+                        formatted_product = {
+                            'name': item.get('title', 'Без названия'),
+                            'price': item.get('sku', {}).get('def', {}).get('promotionPrice', item.get('sku', {}).get('def', {}).get('price', 'Цена не указана')),
+                            'image': f"https:{item.get('image', '')}" if item.get('image') and item.get('image').startswith('//') else item.get('image', ''),
+                            'url': f"https:{item.get('itemUrl', '')}" if item.get('itemUrl') and item.get('itemUrl').startswith('//') else item.get('itemUrl', ''),
+                            'description': f"Rating: {item.get('averageStarRate', 'N/A')}/5, Reviews: {item.get('sales', '0')}, Source: AliExpress"
+                        }
+                        formatted_products.append(formatted_product)
+                    elif isinstance(product, dict):
+                        # Fallback для других форматов
+                        formatted_product = {
+                            'name': product.get('title', product.get('name', 'Без названия')),
+                            'price': product.get('price', product.get('salePrice', 'Цена не указана')),
+                            'image': product.get('image', product.get('img', '')),
+                            'url': product.get('url', product.get('link', '')),
+                            'description': f"Source: AliExpress - {product.get('title', product.get('name', 'Product'))}"
+                        }
+                        formatted_products.append(formatted_product)
 
-
-                    image_url = product.get("image", {}).get("imgUrl", "")
-
-
-                    product_url = product.get("productUrl", "")
-                    if product_url and not product_url.startswith("http"):
-                        product_url = f"https:{product_url}"
-
-
-                    description = name
-
-
-                    if "description" in product:
-                        api_description = product.get("description", "")
-                        if api_description:
-                            description = api_description
-
-                   
-                    results.append({
-                        "name": name,
-                        "price": price,
-                        "image": image_url,
-                        "url": product_url,
-                        "description": description
-                    })
-
-                except Exception as e:
-                    print(f"Error processing AliExpress product: {str(e)}")
-                    continue
+            logger.info(f"Найдено товаров: {len(formatted_products)}")
+            return formatted_products
         else:
-            print(f"API request failed with status code: {response.status_code}")
-            print(f"Response: {response.text}")
+            logger.error(f"HTTP {res.status}: {data.decode('utf-8')}")
+            return []
 
     except Exception as e:
-        print(f"Exception during AliExpress API search: {str(e)}")
+        logger.error(f"Ошибка при поиске на AliExpress: {str(e)}")
+        return []
 
-    return results
+def test_aliexpress_api():
+    """
+    Тестовая функция для проверки работы API
+    """
+    print("Тестируем Aliexpress DataHub API...")
+    result = search_aliexpress("phone", 1, 5)
+    print(f"Результат: {len(result)} товаров найдено")
+    if result:
+        print("Первый товар:")
+        print(json.dumps(result[0], ensure_ascii=False, indent=2))
+    return result
 
-# For testing
 if __name__ == "__main__":
-    test_query = "iphone 13"
-    results = search_aliexpress(test_query)
-    print(f"Found {len(results)} results for '{test_query}':")
-    for i, result in enumerate(results, 1):
-        print(f"{i}. {result['name']} - {result['price']}")
-        print(f"   Image: {result['image']}")
-        print(f"   URL: {result['url']}")
-        print()
+    test_aliexpress_api()

@@ -1,3 +1,4 @@
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import concurrent.futures
@@ -11,15 +12,33 @@ import threading
 import pandas as pd
 from PIL import Image
 from dotenv import load_dotenv
-from allegro import search_allegro
+from allegro import search_allegro_improved as search_allegro
 from amazon import search_amazon
 from aliexpress import search_aliexpress
+from batch_search import BatchSearchProcessor
 
-# Load environment variables
+
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app, origins=["http://localhost:3000"], supports_credentials=True, allow_headers=["Content-Type"], methods=["GET", "POST", "OPTIONS"])
+
+
+batch_processor = None
+current_batch_status = {
+    'is_running': False,
+    'progress': 0,
+    'message': '',
+    'total': 0,
+    'current': 0,
+    'failed': 0
+}
+
+def progress_callback(progress_data):
+    """Callback для обновления прогресса"""
+    global current_batch_status
+    current_batch_status.update(progress_data)
+    current_batch_status['is_running'] = True
 
 @app.route('/')
 def index():
@@ -61,6 +80,189 @@ def search():
         'amazon': amazon_results,
         'aliexpress': aliexpress_results
     })
+
+@app.route("/api/aliexpress", methods=["GET"])
+def aliexpress_route():
+    query = request.args.get("query")
+    if not query:
+        return jsonify({"error": "Missing query parameter"}), 400
+    results = search_aliexpress(query)
+    return jsonify(results)
+
+@app.route('/api/batch-search', methods=['POST'])
+def batch_search():
+    """
+    Новый эндпоинт для массовой обработки
+    """
+    global batch_processor, current_batch_status
+    
+    if current_batch_status['is_running']:
+        return jsonify({
+            'error': 'Batch processing is already running. Please wait for completion.'
+        }), 409
+    
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({'error': 'Empty file provided'}), 400
+
+    # Проверяем поддерживаемые форматы
+    supported_formats = ['.csv', '.xlsx', '.xls']
+    file_ext = os.path.splitext(file.filename)[1].lower()
+    
+    if file_ext not in supported_formats:
+        return jsonify({'error': f'Unsupported file format. Supported: {", ".join(supported_formats)}'}), 400
+
+    try:
+        # Сохраняем файл временно
+        temp_input_file = f"temp_input_{int(time.time())}{file_ext}"
+        file.save(temp_input_file)
+        
+        # Получаем параметры из запроса
+        output_format = request.form.get('output_format', 'excel')
+        batch_size = int(request.form.get('batch_size', 50))
+        max_pages = int(request.form.get('max_pages', 1))
+        
+        # Определяем выходной файл
+        output_ext = '.xlsx' if output_format == 'excel' else '.csv' if output_format == 'csv' else '.json'
+        output_file = f"batch_results_{int(time.time())}{output_ext}"
+        
+        # Сбрасываем статус
+        current_batch_status = {
+            'is_running': True,
+            'progress': 0,
+            'message': 'Starting batch processing...',
+            'total': 0,
+            'current': 0,
+            'failed': 0
+        }
+        
+        # Создаем процессор
+        batch_processor = BatchSearchProcessor(max_workers=10)
+        batch_processor.set_progress_callback(progress_callback)
+        
+        # Запускаем обработку в отдельном потоке
+        def run_batch_processing():
+            global current_batch_status
+            try:
+                batch_processor.batch_search_from_file(
+                    input_file=temp_input_file,
+                    output_file=output_file,
+                    max_pages=max_pages,
+                    batch_size=batch_size,
+                    format_type=output_format
+                )
+                current_batch_status['is_running'] = False
+                current_batch_status['message'] = 'Processing completed successfully!'
+                current_batch_status['progress'] = 100
+                
+                # Удаляем временный файл
+                if os.path.exists(temp_input_file):
+                    os.remove(temp_input_file)
+                    
+            except Exception as e:
+                current_batch_status['is_running'] = False
+                current_batch_status['message'] = f'Error: {str(e)}'
+                # logger.error(f"Batch processing error: {e}") # logger is not defined
+                
+                # Удаляем временный файл
+                if os.path.exists(temp_input_file):
+                    os.remove(temp_input_file)
+        
+        thread = threading.Thread(target=run_batch_processing)
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Batch processing started',
+            'output_file': output_file,
+            'job_id': int(time.time())
+        })
+        
+    except Exception as e:
+        # logger.error(f"Error starting batch processing: {e}") # logger is not defined
+        return jsonify({'error': f'Error starting batch processing: {str(e)}'}), 500
+
+@app.route('/api/batch-status', methods=['GET'])
+def batch_status():
+    """
+    Получение статуса массовой обработки
+    """
+    global current_batch_status
+    
+    return jsonify({
+        'success': True,
+        'status': current_batch_status
+    })
+
+@app.route('/api/batch-results/<filename>', methods=['GET'])
+def get_batch_results(filename):
+    """
+    Получение результатов массовой обработки
+    """
+    try:
+        file_path = filename
+        
+        if not os.path.exists(file_path):
+            return jsonify({
+                'success': False,
+                'message': 'Results file not found'
+            }), 404
+        
+        # Определяем тип файла
+        file_ext = os.path.splitext(filename)[1].lower()
+        
+        if file_ext == '.json':
+            with open(file_path, 'r', encoding='utf-8') as f:
+                results = json.load(f)
+            return jsonify({
+                'success': True,
+                'results': results,
+                'filename': filename
+            })
+        else:
+            # Для Excel/CSV возвращаем ссылку на скачивание
+            return jsonify({
+                'success': True,
+                'download_url': f'/api/download/{filename}',
+                'filename': filename
+            })
+            
+    except Exception as e:
+        # logger.error(f"Error retrieving batch results: {e}") # logger is not defined
+        return jsonify({
+            'success': False,
+            'message': f'Error retrieving results: {str(e)}'
+        }), 500
+
+@app.route('/api/download/<filename>', methods=['GET'])
+def download_file(filename):
+    """
+    Скачивание файла с результатами
+    """
+    try:
+        file_path = filename
+        
+        if not os.path.exists(file_path):
+            return jsonify({
+                'success': False,
+                'message': 'File not found'
+            }), 404
+        
+        from flask import send_file
+        return send_file(file_path, as_attachment=True, download_name=filename)
+        
+    except Exception as e:
+        # logger.error(f"Error downloading file: {e}") # logger is not defined
+        return jsonify({
+            'success': False,
+            'message': f'Error downloading file: {str(e)}'
+        }), 500
+
 
 @app.route('/api/generate-image', methods=['POST'])
 def generate_image():
@@ -454,7 +656,7 @@ def process_csv(df):
 
             # Search Allegro
             try:
-                allegro_results = search_allegro(product_name, limit=1)
+                allegro_results = search_allegro(product_name, max_pages=1)
                 if allegro_results:
                     product_result["allegro"] = {
                         "name": allegro_results[0]["name"],
@@ -499,16 +701,7 @@ def process_csv(df):
 
 @app.route('/api/upload-csv', methods=['POST'])
 def upload_csv():
-    """
-    Endpoint to upload and process a CSV file containing product names.
 
-    The CSV file must have a 'product' column.
-    Processing is done in a background thread.
-
-    Returns:
-        JSON response indicating success or error
-    """
-    # Check if file is present in the request
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
 
@@ -550,12 +743,7 @@ def upload_csv():
 
 @app.route('/api/csv-results', methods=['GET'])
 def get_csv_results():
-    """
-    Endpoint to retrieve the results of CSV processing.
 
-    Returns:
-        JSON response containing the results from results.json
-    """
     try:
         # Check if results.json exists
         if not os.path.exists('results.json'):
@@ -577,6 +765,293 @@ def get_csv_results():
         return jsonify({
             'success': False,
             'message': f'Error retrieving results: {str(e)}'
+        }), 500
+
+@app.route('/api/generate-allegro-listing', methods=['POST'])
+def generate_allegro_listing():
+    """
+    Генерирует шаблон объявления для Allegro на основе данных товара
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Импортируем функции из allegro.py
+        from allegro import create_full_allegro_listing, generate_allegro_listing_template
+        
+        # Проверяем, есть ли данные товара
+        if 'product_data' not in data:
+            return jsonify({'error': 'Missing product_data'}), 400
+        
+        product_data = data['product_data']
+        
+        # Проверяем обязательные поля
+        required_fields = ['name', 'price']
+        for field in required_fields:
+            if field not in product_data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # Проверяем, использовать ли OpenAI
+        use_openai = data.get('use_openai', False)
+        
+        # Генерируем шаблон объявления
+        if data.get('full_template', False):
+            # Полный шаблон с дополнительной информацией
+            template = create_full_allegro_listing(product_data, use_openai)
+        else:
+            # Базовый шаблон
+            template = generate_allegro_listing_template(product_data, use_openai)
+        
+        return jsonify({
+            'success': True,
+            'template': template,
+            'message': f'Allegro listing template generated successfully{" with OpenAI" if use_openai else ""}'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error generating Allegro listing template: {str(e)}'
+        }), 500
+
+@app.route('/api/generate-allegro-listing-from-search', methods=['POST'])
+def generate_allegro_listing_from_search():
+    """
+    Генерирует шаблон объявления для Allegro на основе поискового запроса
+    """
+    try:
+        data = request.get_json()
+        if not data or 'query' not in data:
+            return jsonify({'error': 'Missing query parameter'}), 400
+        
+        query = data['query']
+        
+        # Импортируем функции
+        from allegro import search_allegro_improved, create_full_allegro_listing, generate_allegro_listing_template
+        
+        # Ищем товары на Allegro
+        allegro_results = search_allegro_improved(query, max_pages=1)
+        
+        if not allegro_results:
+            return jsonify({
+                'success': False,
+                'error': 'No products found for the given query'
+            }), 404
+        
+        # Берем первый найденный товар
+        product_data = allegro_results[0]
+        
+        # Проверяем, использовать ли OpenAI
+        use_openai = data.get('use_openai', False)
+        
+        # Генерируем шаблон объявления
+        if data.get('full_template', False):
+            template = create_full_allegro_listing(product_data, use_openai)
+        else:
+            template = generate_allegro_listing_template(product_data, use_openai)
+        
+        return jsonify({
+            'success': True,
+            'template': template,
+            'source_product': product_data,
+            'message': f'Allegro listing template generated for query: {query}{" with OpenAI" if use_openai else ""}'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error generating Allegro listing template from search: {str(e)}'
+        }), 500
+
+@app.route('/api/generate-allegro-listing-batch', methods=['POST'])
+def generate_allegro_listing_batch():
+    """
+    Генерирует шаблоны объявлений для Allegro для списка товаров
+    """
+    try:
+        data = request.get_json()
+        if not data or 'products' not in data:
+            return jsonify({'error': 'Missing products list'}), 400
+        
+        products = data['products']
+        if not isinstance(products, list):
+            return jsonify({'error': 'Products must be a list'}), 400
+        
+        # Импортируем функции
+        from allegro import create_full_allegro_listing, generate_allegro_listing_template
+        
+        # Проверяем, использовать ли OpenAI
+        use_openai = data.get('use_openai', False)
+        
+        templates = []
+        
+        for i, product in enumerate(products):
+            try:
+                if data.get('full_template', False):
+                    template = create_full_allegro_listing(product, use_openai)
+                else:
+                    template = generate_allegro_listing_template(product, use_openai)
+                
+                templates.append({
+                    'index': i,
+                    'product_name': product.get('name', 'Unknown'),
+                    'template': template,
+                    'success': True
+                })
+                
+            except Exception as e:
+                templates.append({
+                    'index': i,
+                    'product_name': product.get('name', 'Unknown'),
+                    'error': str(e),
+                    'success': False
+                })
+        
+        return jsonify({
+            'success': True,
+            'templates': templates,
+            'total_processed': len(products),
+            'successful': len([t for t in templates if t['success']]),
+            'failed': len([t for t in templates if not t['success']]),
+            'message': f'Generated {len(templates)} Allegro listing templates{" with OpenAI" if use_openai else ""}'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error generating batch Allegro listing templates: {str(e)}'
+        }), 500
+
+@app.route('/api/generate-allegro-listing-from-csv', methods=['POST'])
+def generate_allegro_listing_from_csv():
+    """
+    Генерирует шаблоны объявлений для Allegro из CSV файла
+    """
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+
+        file = request.files['file']
+
+        # Check if the file is empty
+        if file.filename == '':
+            return jsonify({'error': 'Empty file provided'}), 400
+
+        # Check if the file is a CSV
+        if not file.filename.lower().endswith('.csv'):
+            return jsonify({'error': 'File must be a CSV'}), 400
+
+        # Получаем параметры из формы
+        use_openai = request.form.get('use_openai', 'false').lower() == 'true'
+        full_template = request.form.get('full_template', 'false').lower() == 'true'
+        search_products = request.form.get('search_products', 'false').lower() == 'true'
+
+        try:
+            # Read the CSV file
+            df = pd.read_csv(file)
+
+            # Check if either 'product' or 'product_name' column exists
+            if 'product' not in df.columns and 'product_name' not in df.columns:
+                return jsonify({'error': 'CSV file must contain either a "product" or "product_name" column'}), 400
+
+            # If only product_name exists, rename it to product for consistency
+            if 'product_name' in df.columns and 'product' not in df.columns:
+                df = df.rename(columns={'product_name': 'product'})
+
+            # Импортируем функции
+            from allegro import create_full_allegro_listing, generate_allegro_listing_template, search_allegro_improved
+
+            templates = []
+            products_processed = 0
+
+            for index, row in df.iterrows():
+                try:
+                    product_name = row['product']
+                    
+                    if search_products:
+                        # Ищем товар на Allegro
+                        allegro_results = search_allegro_improved(product_name, max_pages=1)
+                        if allegro_results:
+                            product_data = allegro_results[0]
+                        else:
+                            # Создаем базовые данные если товар не найден
+                            product_data = {
+                                'name': product_name,
+                                'price': 'Cena do uzgodnienia',
+                                'url': '',
+                                'image': '',
+                                'description': f'Produkt: {product_name}'
+                            }
+                    else:
+                        # Используем только название товара
+                        product_data = {
+                            'name': product_name,
+                            'price': 'Cena do uzgodnienia',
+                            'url': '',
+                            'image': '',
+                            'description': f'Produkt: {product_name}'
+                        }
+
+                    # Генерируем шаблон объявления
+                    if full_template:
+                        template = create_full_allegro_listing(product_data, use_openai)
+                    else:
+                        template = generate_allegro_listing_template(product_data, use_openai)
+
+                    templates.append({
+                        'index': index,
+                        'product_name': product_name,
+                        'template': template,
+                        'success': True
+                    })
+
+                    products_processed += 1
+
+                except Exception as e:
+                    templates.append({
+                        'index': index,
+                        'product_name': row.get('product', 'Unknown'),
+                        'error': str(e),
+                        'success': False
+                    })
+
+            # Сохраняем результаты в файл
+            import json
+            from datetime import datetime
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"allegro_templates_{timestamp}.json"
+            
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'generated_at': datetime.now().isoformat(),
+                    'use_openai': use_openai,
+                    'full_template': full_template,
+                    'search_products': search_products,
+                    'total_products': len(df),
+                    'successful': len([t for t in templates if t['success']]),
+                    'failed': len([t for t in templates if not t['success']]),
+                    'templates': templates
+                }, f, ensure_ascii=False, indent=2)
+
+            return jsonify({
+                'success': True,
+                'templates': templates,
+                'total_products': len(df),
+                'successful': len([t for t in templates if t['success']]),
+                'failed': len([t for t in templates if not t['success']]),
+                'filename': filename,
+                'message': f'Generated {len(templates)} Allegro listing templates from CSV{" with OpenAI" if use_openai else ""}'
+            })
+
+        except Exception as e:
+            return jsonify({'error': f'Error processing CSV file: {str(e)}'}), 500
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error generating Allegro listing templates from CSV: {str(e)}'
         }), 500
 
 if __name__ == '__main__':
