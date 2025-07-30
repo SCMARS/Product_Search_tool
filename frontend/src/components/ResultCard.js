@@ -10,6 +10,12 @@ const ResultCard = ({ product }) => {
   const [uploadedImage, setUploadedImage] = useState(null);
   const fileInputRef = useRef(null);
 
+  // Новые состояния для генерации описания
+  const [generatedDescription, setGeneratedDescription] = useState(null);
+  const [generatingDescription, setGeneratingDescription] = useState(false);
+  const [descriptionError, setDescriptionError] = useState(null);
+  const [showGeneratedDescription, setShowGeneratedDescription] = useState(false);
+
   const copyDescription = () => {
     // Use the dedicated description field if available, otherwise create one from name, price, and URL
     const description = product.description 
@@ -91,6 +97,66 @@ const ResultCard = ({ product }) => {
     fileInputRef.current.click();
   };
 
+  const generateProductDescription = async () => {
+    // Reset states
+    setGeneratingDescription(true);
+    setDescriptionError(null);
+
+    try {
+      const response = await axios.post('http://127.0.0.1:5001/api/generate-product-description', {
+        name: product.name,
+        price: product.price,
+        url: product.url,
+        image: product.image,
+        source: product.description?.includes('Allegro') ? 'Allegro' :
+                product.description?.includes('Amazon') ? 'Amazon' :
+                product.description?.includes('AliExpress') ? 'AliExpress' : 'Unknown'
+      }, {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000 // 30 seconds timeout
+      });
+
+      setGeneratedDescription(response.data.description);
+      setShowGeneratedDescription(true);
+    } catch (err) {
+      console.error('Error generating product description:', err);
+
+      // Handle different types of errors
+      if (err.response) {
+        if (err.response.data && err.response.data.error) {
+          setDescriptionError(err.response.data.error);
+        } else {
+          setDescriptionError(`Server error: ${err.response.status}`);
+        }
+      } else if (err.request) {
+        if (err.code === 'ECONNABORTED') {
+          setDescriptionError('Request timed out. The server took too long to respond.');
+        } else {
+          setDescriptionError('No response from server. Please check your connection.');
+        }
+      } else {
+        setDescriptionError('Failed to generate description. Please try again later.');
+      }
+    } finally {
+      setGeneratingDescription(false);
+    }
+  };
+
+  const copyGeneratedDescription = () => {
+    if (generatedDescription) {
+      navigator.clipboard.writeText(generatedDescription)
+        .then(() => {
+          setCopySuccess(true);
+          setTimeout(() => setCopySuccess(false), 2000);
+        })
+        .catch(err => {
+          console.error('Failed to copy generated description: ', err);
+        });
+    }
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-md overflow-hidden mb-4 hover:shadow-lg transition-shadow duration-300">
       <div className="p-4">
@@ -157,15 +223,28 @@ const ResultCard = ({ product }) => {
             View Product
           </a>
 
-          <button 
+          <button
             onClick={copyDescription}
             className={`w-full text-center py-2 px-4 rounded transition-colors duration-200 ${
-              copySuccess 
-                ? 'bg-green-100 text-green-700' 
+              copySuccess
+                ? 'bg-green-100 text-green-700'
                 : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
             }`}
           >
             {copySuccess ? 'Copied!' : 'Copy Description'}
+          </button>
+
+          {/* Кнопка генерации описания товара */}
+          <button
+            onClick={generateProductDescription}
+            disabled={generatingDescription}
+            className={`w-full text-center py-2 px-4 rounded transition-colors duration-200 ${
+              generatingDescription
+                ? 'bg-orange-100 text-orange-700 cursor-not-allowed'
+                : 'bg-orange-50 hover:bg-orange-100 text-orange-700'
+            }`}
+          >
+            {generatingDescription ? 'Генерируем описание...' : '🤖 Сгенерировать описание'}
           </button>
 
           <div className="flex space-x-2">
@@ -218,6 +297,56 @@ const ResultCard = ({ product }) => {
               {imageError}
             </div>
           )}
+
+          {/* Display description error if there is one */}
+          {descriptionError && (
+            <div className="mt-2 p-2 bg-red-100 text-red-700 rounded text-sm">
+              {descriptionError}
+            </div>
+          )}
+
+          {/* Display generated description if available */}
+          {generatedDescription && (
+            <div className="mt-3 border border-orange-200 rounded-lg p-3 bg-orange-50">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium text-orange-800">🤖 AI Описание товара:</p>
+                <button
+                  onClick={() => setShowGeneratedDescription(!showGeneratedDescription)}
+                  className="text-sm text-orange-600 hover:text-orange-800 flex items-center"
+                >
+                  {showGeneratedDescription ? 'Скрыть' : 'Показать'}
+                  <svg
+                    className={`ml-1 w-4 h-4 transition-transform ${showGeneratedDescription ? 'transform rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
+                  </svg>
+                </button>
+              </div>
+
+              {showGeneratedDescription && (
+                <>
+                  <div className="text-sm text-gray-700 bg-white p-3 rounded border border-orange-200 max-h-60 overflow-y-auto whitespace-pre-wrap">
+                    {generatedDescription}
+                  </div>
+                  <button
+                    onClick={copyGeneratedDescription}
+                    className={`mt-2 w-full text-center py-2 px-4 rounded transition-colors duration-200 text-sm ${
+                      copySuccess
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-orange-100 hover:bg-orange-200 text-orange-700'
+                    }`}
+                  >
+                    {copySuccess ? 'Скопировано!' : 'Копировать AI описание'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+
 
           {/* Display generated image if available */}
           {generatedImage && !imageError && (

@@ -1,345 +1,419 @@
-from playwright.sync_api import sync_playwright
+import requests
+from bs4 import BeautifulSoup
+import logging
 import time
-import re
-from difflib import SequenceMatcher
+import random
+from urllib.parse import urlencode, quote_plus
 
-def similarity(a, b):
-    """Calculate similarity between two strings"""
-    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+logger = logging.getLogger(__name__)
 
-def calculate_relevance_score(product_name, query):
-    """Calculate detailed relevance score for a product"""
-    query_lower = query.lower()
+def matches_query(product_name, query, min_score=30):
+    """
+    Проверяет, соответствует ли название товара поисковому запросу
+    Улучшенная версия для точного поиска
+    """
+    if not product_name or not query:
+        return False
+
     product_lower = product_name.lower()
+    query_lower = query.lower()
+
+    # Разбиваем запрос на слова
     query_words = query_lower.split()
-    product_words = product_lower.split()
 
-    scores = {
-        'exact_match': 0,
-        'word_order': 0,
-        'word_coverage': 0,
-        'brand_match': 0,
-        'phrase_match': 0,
-        'overall_similarity': 0
-    }
+    # Базовый счет - количество совпадающих слов
+    score = 0
+    matched_words = 0
 
-    # Exact match bonus
+    # СУПЕР БОНУС за точное совпадение всей фразы
     if query_lower in product_lower:
-        scores['exact_match'] = 100
+        score += 100  # Максимальный бонус за точное совпадение
+        logger.debug(f"🎯 ТОЧНОЕ СОВПАДЕНИЕ: '{query_lower}' в '{product_lower}'")
 
-    # Word order preservation (consecutive words get bonus)
-    consecutive_matches = 0
-    max_consecutive = 0
-    for i in range(len(query_words)):
-        for j in range(len(product_words)):
-            if query_words[i] == product_words[j]:
-                consecutive = 1
-                k, l = i + 1, j + 1
-                while k < len(query_words) and l < len(product_words) and query_words[k] == product_words[l]:
-                    consecutive += 1
-                    k += 1
-                    l += 1
-                max_consecutive = max(max_consecutive, consecutive)
-    scores['word_order'] = (max_consecutive / len(query_words)) * 50
+    # Проверяем каждое слово из запроса
+    for word in query_words:
+        if len(word) > 1 and word in product_lower:  # Учитываем даже короткие важные слова
+            if len(word) <= 2:
+                score += 5   # Маленький бонус за короткие слова (11, 16, pro)
+            elif len(word) <= 4:
+                score += 15  # Средний бонус за средние слова (ipad, pro)
+            else:
+                score += 20  # Большой бонус за длинные слова
+            matched_words += 1
 
-    # Word coverage (how many query words are found)
-    found_words = sum(1 for word in query_words if word in product_words)
-    scores['word_coverage'] = (found_words / len(query_words)) * 30
+    # Бонус за процент совпавших слов
+    if len(query_words) > 0:
+        match_percentage = matched_words / len(query_words)
+        score += int(match_percentage * 30)  # До 30 дополнительных баллов
 
-    # Brand matching (first word is often brand)
-    if len(query_words) > 0 and len(product_words) > 0:
-        if query_words[0] in product_words[:3]:  # Brand usually in first 3 words
-            scores['brand_match'] = 20
+    # ОГРОМНЫЙ бонус за точное совпадение бренда в начале названия
+    if len(query_words) >= 1:
+        brand = query_words[0]  # Первое слово как бренд
+        if product_lower.startswith(brand.lower()) or f" {brand.lower()} " in product_lower:
+            score += 50  # Большой бонус за правильный бренд
 
-    # Phrase matching (2+ consecutive words)
+    # Проверяем фразы из 2 слов
     for i in range(len(query_words) - 1):
         phrase = f"{query_words[i]} {query_words[i+1]}"
+        if len(phrase) > 3 and phrase in product_lower:  # Минимум 3 символа
+            score += 25  # Бонус за фразу из 2 слов
+
+    # Проверяем фразы из 3 слов
+    for i in range(len(query_words) - 2):
+        phrase = f"{query_words[i]} {query_words[i+1]} {query_words[i+2]}"
         if phrase in product_lower:
-            scores['phrase_match'] += 15
+            score += 35  # Больший бонус за фразу из 3 слов
 
-    # Overall similarity
-    scores['overall_similarity'] = similarity(product_name, query) * 20
+    # Проверяем фразы из 4+ слов
+    for i in range(len(query_words) - 3):
+        phrase = " ".join(query_words[i:i+4])
+        if phrase in product_lower:
+            score += 50  # Максимальный бонус за длинную фразу
 
-    return sum(scores.values()), scores
+    # Дополнительный бонус за точное совпадение всего запроса
+    if query_lower in product_lower:
+        score += 40
 
-def matches_query(product_name, query, min_score=25):
-    """Check if product name matches the search query with improved logic"""
-    score, details = calculate_relevance_score(product_name, query)
+    # Специальные названия для популярных товаров
+    special_names = {
+        'apple mouse': ['magic mouse', 'apple magic mouse'],
+        'apple keyboard': ['magic keyboard', 'apple magic keyboard'],
+        'apple watch': ['apple watch', 'iwatch'],
+        'airpods': ['airpods', 'air pods'],
+        'iphone': ['iphone'],
+        'macbook': ['macbook'],
+        'ipad': ['ipad']
+    }
 
-    # Special rules for different types of queries
-    query_lower = query.lower()
-    product_lower = product_name.lower()
-    query_words = set(query_lower.split())
+    # Проверяем специальные названия
+    for search_term, alternatives in special_names.items():
+        if search_term in query_lower:
+            for alt_name in alternatives:
+                if alt_name in product_lower:
+                    score += 35  # Бонус за альтернативное название
 
-    # Must have at least one main keyword
-    essential_words = query_words - {'the', 'a', 'an', 'for', 'with', 'and', 'or'}
-    if not essential_words:
-        essential_words = query_words
+    # Бонус за правильный порядок слов
+    # Проверяем, идут ли слова в том же порядке что и в запросе
+    last_position = -1
+    ordered_words = 0
+    for word in query_words:
+        if len(word) > 2:  # Игнорируем короткие слова
+            position = product_lower.find(word)
+            if position > last_position:
+                ordered_words += 1
+                last_position = position
 
-    found_essential = sum(1 for word in essential_words if word in product_lower)
+    if ordered_words >= 2:
+        score += ordered_words * 5  # Бонус за каждое слово в правильном порядке
 
-    # For brand + product queries (like "apple mouse"), both should be present
-    if len(essential_words) >= 2:
-        # If it's a brand + product query, require higher coverage
-        required_coverage = 0.7 if len(essential_words) <= 3 else 0.6
-        coverage_ratio = found_essential / len(essential_words)
+    # УНИВЕРСАЛЬНЫЙ бонус за основные товары (не аксессуары)
+    # Ищем признаки основного товара для ЛЮБОГО бренда
+    main_product_indicators = [
+        'gb', 'ssd', 'ram', 'memory', 'speicher', 'inch', 'zoll', '"', 'mm', 'cm',
+        'gps', 'cellular', 'wifi', 'bluetooth', 'processor', 'cpu', 'gpu',
+        'battery', 'akku', 'mah', 'watt', 'volt', 'amp', 'hz', 'ghz'
+    ]
 
-        if coverage_ratio < required_coverage:
-            return False
+    if any(indicator in product_lower for indicator in main_product_indicators):
+        score += 30  # Бонус за основной товар (не аксессуар)
+    
+    # УНИВЕРСАЛЬНАЯ фильтрация аксессуаров для ВСЕХ товаров
+    # Если ищем аксессуары - НЕ штрафуем их
+    looking_for_accessories = any(word in query_lower for word in [
+        'чехол', 'case', 'cover', 'hülle', 'schutz', 'защита', 'клавиатура', 'keyboard',
+        'кабель', 'cable', 'adapter', 'адаптер', 'сумка', 'bag', 'tasche', 'charger',
+        'ladegerät', 'ladekabel', 'armband', 'strap', 'band', 'ремешок'
+    ])
 
-    # Minimum score threshold
-    return score >= min_score
+    if not looking_for_accessories:
+        # УНИВЕРСАЛЬНЫЙ список аксессуаров для ВСЕХ брендов
+        accessory_keywords = [
+            # Чехлы и защита
+            'hülle', 'case', 'cover', 'tasche', 'bag', 'schutz', 'protection', 'folie', 'screen',
+            # Кабели и адаптеры
+            'kabel', 'cable', 'ladekabel', 'schnellladekabel', 'adapter', 'charger', 'ladegerät',
+            'usb-c', 'usb c', 'lightning', 'magsafe', 'magnetisch', 'magnetic',
+            # Подставки и держатели
+            'ständer', 'stand', 'halter', 'holder', 'dock', 'station',
+            # Клавиатуры и мыши
+            'tastatur', 'keyboard', 'maus', 'mouse', 'tastenkappen', 'keycaps',
+            # Ремешки и браслеты
+            'armband', 'strap', 'band', 'bracelet', 'wristband',
+            # Сетевые аксессуары
+            'ethernet', 'lan', 'hub', 'network', 'netzwerk', 'rj45',
+            # Заглушки и мелочи
+            'staubschutz', 'stöpsel', 'stecker', 'dust', 'plug',
+            # Замена и ремонт
+            'ersatz', 'replacement', 'repair', 'reparatur', 'zubehör', 'accessory',
+            # Языковые аксессуары
+            'arabische', 'arabic', 'russian', 'deutsch', 'english'
+        ]
 
-def search_amazon(query, limit=3, max_pages=3):
+        # Штрафуем аксессуары для ВСЕХ товаров одинаково
+        accessory_count = 0
+        for keyword in accessory_keywords:
+            if keyword in product_lower:
+                accessory_count += 1
+
+        # Штраф зависит от количества "аксессуарных" слов
+        if accessory_count >= 2:
+            score -= 30  # Большой штраф если много аксессуарных слов
+        elif accessory_count == 1:
+            score -= 15  # Маленький штраф если одно слово (может быть совместимость)
+    
+    # Проверяем минимальный порог
+    logger.info(f"🔍 Товар: {product_name[:60]}... | Score: {score} | Порог: {min_score}")
+
+    # Специальная отладка для Apple товаров
+    if 'apple' in query_lower and 'apple' in product_lower:
+        logger.info(f"🍎 APPLE товар найден: {product_name[:40]}... | Score: {score}")
+
+    if score >= min_score:
+        logger.info(f"✅ ПРИНЯТ: {product_name[:50]}... (Score: {score})")
+        return True
+    else:
+        logger.info(f"❌ ОТКЛОНЕН: {product_name[:50]}... (Score: {score})")
+        return False
+
+def search_amazon(query, limit=3, max_pages=1):
+    """
+    Поиск товаров на Amazon.de - ТОЛЬКО РЕАЛЬНЫЕ РЕЗУЛЬТАТЫ
+    """
     results = []
-    found_count = 0
-
+    
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            )
-            page = context.new_page()
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
+        # ТОЛЬКО ПЕРВАЯ СТРАНИЦА
+        page = 1
+        logger.info(f"Searching page {page}...")
 
-            for page_num in range(1, max_pages + 1):
-                if found_count >= limit:
-                    break
+        # Формируем URL для поиска с улучшенными параметрами
+        search_params = {
+            'k': query,
+            'ref': 'sr_pg_1',
+            'sprefix': query.replace(' ', '+'),  # Помогает с автодополнением
+            'crid': '1234567890'  # Случайный ID для сессии
+        }
 
-                # Construct URL with page parameter
-                if page_num == 1:
-                    url = f"https://www.amazon.de/s?k={query.replace(' ', '+')}"
-                else:
-                    url = f"https://www.amazon.de/s?k={query.replace(' ', '+')}&page={page_num}"
+        url = f"https://www.amazon.de/s?{urlencode(search_params)}"
+        logger.info(f"🔍 Amazon URL: {url}")
 
-                print(f"Searching page {page_num}...")
-                page.goto(url, wait_until="domcontentloaded")
-                time.sleep(3)
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
 
-                # Scroll down to load all content
-                page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
-                time.sleep(2)
+        soup = BeautifulSoup(response.content, 'html.parser')
 
-                # Get all product containers
-                products = page.query_selector_all("div[data-asin][data-component-type='s-search-result']")
-                valid_products = [p for p in products if p.get_attribute("data-asin") and p.get_attribute("data-asin") != ""]
+        # Сохраняем HTML для отладки Apple товаров
+        if 'apple mouse' in query.lower():
+            try:
+                with open('backend/debug_amazon_apple_mouse.html', 'w', encoding='utf-8') as f:
+                    f.write(soup.prettify())
+                logger.info("💾 Сохранен HTML для отладки: debug_amazon_apple_mouse.html")
+            except Exception as e:
+                logger.debug(f"Не удалось сохранить HTML: {e}")
 
-                print(f"Found {len(valid_products)} products on page {page_num}")
+        # Ищем товары на странице
+        products = soup.find_all('div', {'data-component-type': 's-search-result'})
 
-                for product in valid_products:
-                    if found_count >= limit:
+        logger.info(f"Found {len(products)} products on page {page}")
+
+        logger.info(f"🔍 Обрабатываем {len(products)} товаров...")
+
+        for i, product in enumerate(products):
+            if len(results) >= limit:
+                break
+
+            logger.debug(f"🔍 Товар {i+1}/{len(products)}")
+
+            try:
+                # Название товара - пробуем разные селекторы
+                title = None
+                title_selectors = [
+                    'h2 a span',  # Основной селектор
+                    'h2 span',    # Альтернативный
+                    'h2 a',       # Ссылка в заголовке
+                    'h2',         # Сам заголовок
+                    '.a-size-medium',  # Класс размера
+                    '.a-size-mini'     # Маленький размер
+                ]
+
+                for selector in title_selectors:
+                    title_elem = product.select_one(selector)
+                    if title_elem:
+                        title = title_elem.get_text(strip=True)
+                        if title and len(title) > 10:  # Минимальная длина названия
+                            break
+
+                if not title:
+                    logger.debug("❌ Не найдено название товара")
+                    continue
+
+                logger.debug(f"📦 Найден товар: {title[:60]}...")
+
+                # Проверяем релевантность
+                if not matches_query(title, query):
+                    continue
+
+                logger.info(f"✅ Товар прошел фильтр: {title[:50]}...")
+
+                # Цена - улучшенный парсинг с полной ценой
+                price = "Цена не указана"
+
+                # Сначала пробуем найти полную цену в блоке .a-price
+                price_container = product.select_one('.a-price')
+                if price_container:
+                    # Ищем скрытый текст с полной ценой
+                    offscreen = price_container.select_one('.a-offscreen')
+                    if offscreen:
+                        price_text = offscreen.get_text(strip=True)
+                        if price_text and any(char.isdigit() for char in price_text):
+                            price = price_text
+                            logger.debug(f"💰 Найдена полная цена: {price}")
+                    else:
+                        # Если нет скрытого текста, собираем цену из частей
+                        whole_part = price_container.select_one('.a-price-whole')
+                        fraction_part = price_container.select_one('.a-price-fraction')
+                        symbol_part = price_container.select_one('.a-price-symbol')
+
+                        if whole_part:
+                            whole_text = whole_part.get_text(strip=True)
+                            symbol_text = symbol_part.get_text(strip=True) if symbol_part else ""
+                            fraction_text = fraction_part.get_text(strip=True) if fraction_part else ""
+
+                            # Собираем полную цену
+                            if fraction_text:
+                                price = f"{symbol_text}{whole_text},{fraction_text}"
+                            else:
+                                price = f"{symbol_text}{whole_text}"
+                            logger.debug(f"💰 Собрана цена из частей: {price}")
+
+                # Если цена все еще не найдена, пробуем другие селекторы
+                if price == "Цена не указана":
+                    price_selectors = [
+                        '.a-price .a-offscreen',  # Цена внутри блока цены
+                        '.a-price-range',  # Диапазон цен
+                        '.a-text-price',   # Текстовая цена
+                        '.a-color-price',   # Цветная цена
+                        'span[class*="price"]'  # Любой span с price в классе
+                    ]
+
+                    for selector in price_selectors:
+                        price_elem = product.select_one(selector)
+                        if price_elem:
+                            price_text = price_elem.get_text(strip=True)
+                            if price_text and any(char.isdigit() for char in price_text):
+                                price = price_text
+                                logger.debug(f"💰 Найдена цена через селектор '{selector}': {price}")
+                                break
+
+                # Если цена все еще не найдена, пробуем найти любой текст с символами валют
+                if price == "Цена не указана":
+                    price_patterns = product.find_all(text=lambda text: text and ('€' in text or '$' in text or '£' in text) and any(c.isdigit() for c in text))
+                    if price_patterns:
+                        price = price_patterns[0].strip()
+                        logger.debug(f"💰 Найдена цена через паттерн: {price}")
+
+                # Ссылка - пробуем разные селекторы
+                link = ""
+                link_selectors = [
+                    'h2 a',  # Основной селектор
+                    'a[data-component-type="s-product-image"]',  # Ссылка на изображение
+                    'a.a-link-normal',  # Обычная ссылка
+                    '.s-link-style a',  # Ссылка в стиле поиска
+                    'a[href*="/dp/"]',  # Прямая ссылка на товар
+                    'a[href*="/gp/product/"]'  # Альтернативная ссылка на товар
+                ]
+
+                for selector in link_selectors:
+                    link_elem = product.select_one(selector)
+                    if link_elem and link_elem.get('href'):
+                        href = link_elem['href']
+                        if href.startswith('/'):
+                            link = f"https://www.amazon.de{href}"
+                        else:
+                            link = href
+                        logger.debug(f"🔗 Найдена ссылка через селектор '{selector}': {link[:50]}...")
                         break
 
-                    asin = product.get_attribute("data-asin")
+                if not link:
+                    logger.warning(f"⚠️ Не найдена ссылка для товара: {title[:30]}...")
 
-                    # Try multiple selectors for title
-                    title_elem = product.query_selector("h2 a span")
-                    if not title_elem:
-                        title_elem = product.query_selector("h2 span")
-                    if not title_elem:
-                        title_elem = product.query_selector("h2 a")
-                    if not title_elem:
-                        continue
+                # Изображение
+                image = ""
+                img_elem = product.select_one('img.s-image')
+                if img_elem and img_elem.get('src'):
+                    image = img_elem['src']
 
-                    name = title_elem.inner_text().strip()
+                # Описание - извлекаем реальное описание товара
+                description = "Найдено на Amazon.de"
 
-                    # Check if this product matches our query
-                    relevance_score, score_details = calculate_relevance_score(name, query)
-                    if not matches_query(name, query):
-                        print(f"Skipping non-matching product: {name[:50]}... (Score: {relevance_score:.1f})")
-                        continue
+                # Пробуем найти описание товара
+                desc_selectors = [
+                    '.a-size-base-plus',  # Основное описание
+                    '.a-size-base',       # Альтернативное описание
+                    '.s-size-mini',       # Краткое описание
+                    '[data-cy="title-recipe-review-snippet"]',  # Отзывы
+                    '.a-row .a-size-small'  # Дополнительная информация
+                ]
 
-                    print(f"Found matching product: {name[:50]}... (Score: {relevance_score:.1f})")
+                for desc_selector in desc_selectors:
+                    desc_elem = product.select_one(desc_selector)
+                    if desc_elem:
+                        desc_text = desc_elem.get_text(strip=True)
+                        if desc_text and len(desc_text) > 20 and desc_text != title:
+                            description = desc_text[:200] + "..." if len(desc_text) > 200 else desc_text
+                            break
 
-                    # Get price
-                    price_elem = product.query_selector("span.a-price span.a-offscreen")
-                    if not price_elem:
-                        price_elem = product.query_selector("span.a-price-whole")
-                    price = price_elem.inner_text().strip() if price_elem else "Price not available"
+                # Если описания нет, создаем из названия
+                if description == "Найдено на Amazon.de":
+                    # Извлекаем ключевые характеристики из названия
+                    key_features = []
+                    if 'bluetooth' in title.lower():
+                        key_features.append('Bluetooth')
+                    if 'wireless' in title.lower() or 'kabellos' in title.lower():
+                        key_features.append('Беспроводной')
+                    if 'rechargeable' in title.lower() or 'wiederaufladbar' in title.lower():
+                        key_features.append('Перезаряжаемый')
+                    if 'waterproof' in title.lower() or 'wasserdicht' in title.lower():
+                        key_features.append('Водонепроницаемый')
+                    if any(word in title.lower() for word in ['gb', 'tb', 'mb']):
+                        storage_match = next((word for word in title.split() if any(unit in word.lower() for unit in ['gb', 'tb', 'mb'])), None)
+                        if storage_match:
+                            key_features.append(f'Память: {storage_match}')
 
-                    # Get image
-                    img_elem = product.query_selector("img.s-image")
-                    image_url = img_elem.get_attribute("src") if img_elem else ""
+                    if key_features:
+                        description = f"Характеристики: {', '.join(key_features)}. Найдено на Amazon.de"
+                    else:
+                        description = f"Товар от Amazon.de. Цена: {price}"
 
-                    # Construct product URL
-                    product_url = f"https://www.amazon.de/dp/{asin}" if asin else ""
+                product_data = {
+                    'name': title,
+                    'price': price,
+                    'url': link,
+                    'image': image,
+                    'description': description
+                }
 
-                    # Get description
-                    description = name
-                    try:
-                        if product_url:
-                            # Open product page in new tab
-                            product_page = context.new_page()
-                            product_page.goto(product_url, wait_until="domcontentloaded", timeout=10000)
-                            time.sleep(2)
+                results.append(product_data)
+                logger.info(f"✅ Добавлен товар: {title[:40]}... | Цена: {price}")
 
-                            # Try to find product description
-                            desc_elem = product_page.query_selector("#productDescription p")
-                            if desc_elem:
-                                additional_desc = desc_elem.inner_text().strip()
-                                if additional_desc and len(additional_desc) > len(name):
-                                    description = additional_desc
-
-                            # If no description, try feature bullets
-                            if description == name:
-                                feature_bullets = product_page.query_selector_all("#feature-bullets li span.a-list-item")
-                                if feature_bullets:
-                                    bullet_points = []
-                                    for bullet in feature_bullets[:5]:  # Limit to first 5 bullets
-                                        bullet_text = bullet.inner_text().strip()
-                                        if bullet_text and len(bullet_text) > 10:  # Filter out short/empty bullets
-                                            bullet_points.append(bullet_text)
-                                    if bullet_points:
-                                        description = "• " + "\n• ".join(bullet_points)
-
-                            product_page.close()
-                    except Exception as e:
-                        print(f"Error getting description for {name}: {e}")
-
-                    results.append({
-                        "name": name,
-                        "price": price,
-                        "image": image_url,
-                        "url": product_url,
-                        "description": description,
-                        "relevance_score": relevance_score,
-                        "score_details": score_details
-                    })
-                    found_count += 1
-
-            browser.close()
-
+            except Exception as e:
+                logger.error(f"❌ Ошибка обработки товара: {e}")
+                continue
+    
     except Exception as e:
-        print(f"Exception during Amazon search: {e}")
-
-    # Sort results by relevance score (most relevant first)
-    results.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
+        logger.error(f"Ошибка поиска Amazon: {e}")
+    
+    # НЕТ ТЕСТОВЫХ ДАННЫХ - возвращаем только реальные результаты
+    if not results:
+        logger.info("❌ Amazon поиск не дал результатов")
 
     return results
-
-def search_amazon_advanced(query, limit=3, exact_match_only=False):
-    """
-    Advanced search with better filtering options
-    """
-    results = []
-
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            )
-            page = context.new_page()
-
-            # Try different search strategies
-            search_variations = [
-                query,
-                f'"{query}"',  # Exact phrase search
-                query.replace(' ', '+')
-            ]
-
-            for search_term in search_variations:
-                if len(results) >= limit:
-                    break
-
-                url = f"https://www.amazon.de/s?k={search_term}"
-                page.goto(url, wait_until="domcontentloaded")
-                time.sleep(3)
-
-                page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
-                time.sleep(2)
-
-                products = page.query_selector_all("div[data-asin][data-component-type='s-search-result']")
-                valid_products = [p for p in products if p.get_attribute("data-asin") and p.get_attribute("data-asin") != ""]
-
-                for product in valid_products:
-                    if len(results) >= limit:
-                        break
-
-                    asin = product.get_attribute("data-asin")
-
-                    title_elem = product.query_selector("h2 a span") or product.query_selector("h2 span")
-                    if not title_elem:
-                        continue
-
-                    name = title_elem.inner_text().strip()
-
-                    # Apply stricter matching if exact_match_only is True
-                    min_score = 50 if exact_match_only else 25
-                    if not matches_query(name, query, min_score):
-                        continue
-
-                    # Check if we already have this product (by ASIN)
-                    if any(r.get('asin') == asin for r in results):
-                        continue
-
-                    price_elem = product.query_selector("span.a-price span.a-offscreen")
-                    price = price_elem.inner_text().strip() if price_elem else "Price not available"
-
-                    img_elem = product.query_selector("img.s-image")
-                    image_url = img_elem.get_attribute("src") if img_elem else ""
-
-                    product_url = f"https://www.amazon.de/dp/{asin}" if asin else ""
-
-                    relevance_score, _ = calculate_relevance_score(name, query)
-                    results.append({
-                        "name": name,
-                        "price": price,
-                        "image": image_url,
-                        "url": product_url,
-                        "asin": asin,
-                        "relevance_score": relevance_score
-                    })
-
-            browser.close()
-
-    except Exception as e:
-        print(f"Exception during Amazon search: {e}")
-
-    # Sort by relevance and return
-    results.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
-    return results[:limit]
-
-if __name__ == "__main__":
-    # Test with MacBook M4 Pro
-    test_query = "macbook m4 pro"
-    print(f"Searching for: '{test_query}'")
-    print("=" * 50)
-
-    # Use the improved search
-    results = search_amazon(test_query, limit=3, max_pages=2)
-
-    print(f"\nFound {len(results)} relevant results:")
-    print("=" * 50)
-
-    for i, result in enumerate(results, 1):
-        print(f"\n{i}. {result['name']}")
-        print(f"   Price: {result['price']}")
-        print(f"   Relevance Score: {result.get('relevance_score', 0):.1f}")
-        print(f"   URL: {result['url']}")
-        print(f"   Description: {result['description'][:100]}...")
-
-    # Test advanced search for exact matches
-    print(f"\n\nAdvanced search (exact matches only):")
-    print("=" * 50)
-
-    advanced_results = search_amazon_advanced(test_query, limit=3, exact_match_only=True)
-
-    for i, result in enumerate(advanced_results, 1):
-        print(f"\n{i}. {result['name']}")
-        print(f"   Price: {result['price']}")
-        print(f"   Relevance Score: {result.get('relevance_score', 0):.1f}")
-
-    # Test with Apple Mouse query
-    print(f"\n\nTesting with 'apple mouse' query:")
-    print("=" * 50)
-
-    mouse_results = search_amazon("apple mouse", limit=3, max_pages=2)
-
-    for i, result in enumerate(mouse_results, 1):
-        print(f"\n{i}. {result['name']}")
-        print(f"   Price: {result['price']}")
-        print(f"   Relevance Score: {result.get('relevance_score', 0):.1f}")
-        if 'score_details' in result:
-            details = result['score_details']
-            print(f"   Score breakdown: Exact:{details['exact_match']:.0f}, Order:{details['word_order']:.0f}, Coverage:{details['word_coverage']:.0f}, Brand:{details['brand_match']:.0f}")

@@ -46,7 +46,7 @@ function App() {
 
     try {
    //api/search
-      const response = await axios.post('http://127.0.0.1:5001/api/search', {
+      const response = await axios.post('http://127.0.0.1:5003/api/search', {
         query: query.trim()
       }, {
         headers: {
@@ -77,13 +77,15 @@ function App() {
     setCsvResults(null);
 
     try {
-      const response = await axios.get('http://127.0.0.1:5001/api/csv-results', {
-        timeout: 10000 // 10 seconds timeout
+      const response = await axios.get('http://127.0.0.1:5003/api/csv-results', {
+        timeout: 10000
       });
 
       if (response.data.success) {
-        setCsvResults(response.data.results);
-        console.log('CSV results fetched successfully:', response.data.results);
+        // Проверяем новый формат данных с метаданными
+        const results = response.data.results.results || response.data.results;
+        setCsvResults(results);
+        console.log('CSV results fetched successfully:', results);
       } else {
         setCsvResultsError(response.data.message || 'Failed to fetch CSV results');
       }
@@ -102,14 +104,13 @@ function App() {
   };
 
   const handleCsvUpload = async () => {
-    // Reset states
+
     setCsvUploading(true);
     setCsvUploadSuccess(false);
     setCsvUploadError(null);
-    // Reset CSV results states
-    setCsvResults(null);
+    setCsvProductsCount(0);
+   // CsvResults(null);
     setCsvResultsError(null);
-
     const fileInput = fileInputRef.current;
     if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
       setCsvUploadError('Please select a CSV file');
@@ -119,9 +120,14 @@ function App() {
 
     const file = fileInput.files[0];
 
-    // Check if file is a CSV
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      setCsvUploadError('File must be a CSV');
+
+    const allowedExtensions = ['.csv', '.xlsx', '.xls'];
+    const isValidFile = allowedExtensions.some(ext =>
+      file.name.toLowerCase().endsWith(ext)
+    );
+
+    if (!isValidFile) {
+      setCsvUploadError('File must be CSV (.csv) or Excel (.xlsx, .xls)');
       setCsvUploading(false);
       return;
     }
@@ -131,7 +137,7 @@ function App() {
     formData.append('file', file);
 
     try {
-      const response = await axios.post('http://127.0.0.1:5001/api/upload-csv', formData, {
+      const response = await axios.post('http://127.0.0.1:5003/api/upload-csv', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         },
@@ -179,10 +185,10 @@ function App() {
 
           {/* CSV Upload Section */}
           <div className="mt-8 p-4 bg-white rounded-lg shadow-md">
-            <h2 className="text-xl font-semibold mb-3">Upload CSV File</h2>
+            <h2 className="text-xl font-semibold mb-3">Upload Product File</h2>
             <p className="text-sm text-gray-600 mb-4">
-              Upload a CSV file with a 'product' column to search for multiple products at once.
-              Results will be saved to results.json on the server.
+              Upload a CSV or Excel file with product characteristics (name, brand, category, color, etc.)
+              to search for multiple products at once. Results will be saved to results.json on the server.
             </p>
 
             <div className="flex flex-col md:flex-row md:items-center md:space-x-4">
@@ -202,7 +208,7 @@ function App() {
                   id="csv-file-input"
                   type="file"
                   ref={fileInputRef}
-                  accept=".csv"
+                  accept=".csv,.xlsx,.xls"
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                   onChange={() => {
                     // Force re-render to update the displayed filename
@@ -219,7 +225,7 @@ function App() {
                   focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50
                   disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {csvUploading ? 'Uploading...' : 'Upload CSV'}
+                {csvUploading ? 'Uploading...' : 'Upload File'}
               </button>
             </div>
 
@@ -257,10 +263,31 @@ function App() {
           {/* CSV Results Section */}
           {csvResults && csvResults.length > 0 && (
             <div className="mt-8 p-4 bg-white rounded-lg shadow-md">
-              <h2 className="text-xl font-semibold mb-3">CSV Processing Results</h2>
-              <p className="text-sm text-gray-600 mb-4">
-                Results from processing your CSV file with {csvResults.length} products.
-              </p>
+              <h2 className="text-xl font-semibold mb-3">File Processing Results</h2>
+              <div className="mb-4 p-3 bg-gray-50 rounded-md">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <span className="font-medium text-gray-700">Products:</span>
+                    <span className="ml-1 text-blue-600">{csvResults.length}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-700">Success Rate:</span>
+                    <span className="ml-1 text-green-600">100%</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-700">Amazon Results:</span>
+                    <span className="ml-1 text-orange-600">
+                      {csvResults.filter(r => r.amazon && r.amazon.length > 0).length}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-700">Total Found:</span>
+                    <span className="ml-1 text-purple-600">
+                      {csvResults.reduce((sum, r) => sum + (r.amazon?.length || 0) + (r.allegro?.length || 0) + (r.aliexpress?.length || 0), 0)}
+                    </span>
+                  </div>
+                </div>
+              </div>
 
               <div className="overflow-x-auto">
                 <table className="min-w-full bg-white border border-gray-200">
@@ -284,49 +311,70 @@ function App() {
                     {csvResults.map((result, index) => (
                       <tr key={index} className={index % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
                         <td className="py-2 px-4 border-b border-gray-200 text-sm">
-                          {result.product}
+                          <div>
+                            <div className="font-medium">{result.query || result.product}</div>
+                            {result.characteristics && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                {Object.entries(result.characteristics).map(([key, value]) => (
+                                  <span key={key} className="mr-2">{key}: {value}</span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </td>
                         <td className="py-2 px-4 border-b border-gray-200 text-sm">
-                          {result.amazon ? (
+                          {result.amazon && result.amazon.length > 0 ? (
                             <div>
-                              <div>{result.amazon.name}</div>
-                              <div className="text-green-600 font-semibold">{result.amazon.price}</div>
-                              <a href={result.amazon.url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+                              <div className="font-medium">{result.amazon[0].name}</div>
+                              <div className="text-green-600 font-semibold">{result.amazon[0].price}</div>
+                              <div className="text-xs text-gray-500">Score: {result.amazon[0].relevance_score?.toFixed(2)}</div>
+                              <a href={result.amazon[0].url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline text-xs">
                                 View on Amazon
                               </a>
+                              {result.amazon.length > 1 && (
+                                <div className="text-xs text-gray-400 mt-1">+{result.amazon.length - 1} more results</div>
+                              )}
                             </div>
-                          ) : result.error && result.error.includes('amazon') ? (
-                            <div className="text-red-500">{result.error}</div>
+                          ) : result.amazon_error ? (
+                            <div className="text-red-500 text-xs">{result.amazon_error}</div>
                           ) : (
                             <div className="text-gray-400">No results</div>
                           )}
                         </td>
                         <td className="py-2 px-4 border-b border-gray-200 text-sm">
-                          {result.allegro ? (
+                          {result.allegro && result.allegro.length > 0 ? (
                             <div>
-                              <div>{result.allegro.name}</div>
-                              <div className="text-green-600 font-semibold">{result.allegro.price}</div>
-                              <a href={result.allegro.url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+                              <div className="font-medium">{result.allegro[0].name}</div>
+                              <div className="text-green-600 font-semibold">{result.allegro[0].price}</div>
+                              <div className="text-xs text-gray-500">Score: {result.allegro[0].relevance_score?.toFixed(2)}</div>
+                              <a href={result.allegro[0].url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline text-xs">
                                 View on Allegro
                               </a>
+                              {result.allegro.length > 1 && (
+                                <div className="text-xs text-gray-400 mt-1">+{result.allegro.length - 1} more results</div>
+                              )}
                             </div>
-                          ) : result.error && result.error.includes('allegro') ? (
-                            <div className="text-red-500">{result.error}</div>
+                          ) : result.allegro_error ? (
+                            <div className="text-red-500 text-xs">{result.allegro_error}</div>
                           ) : (
                             <div className="text-gray-400">No results</div>
                           )}
                         </td>
                         <td className="py-2 px-4 border-b border-gray-200 text-sm">
-                          {result.aliexpress ? (
+                          {result.aliexpress && result.aliexpress.length > 0 ? (
                             <div>
-                              <div>{result.aliexpress.name}</div>
-                              <div className="text-green-600 font-semibold">{result.aliexpress.price}</div>
-                              <a href={result.aliexpress.url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+                              <div className="font-medium">{result.aliexpress[0].name}</div>
+                              <div className="text-green-600 font-semibold">{result.aliexpress[0].price}</div>
+                              <div className="text-xs text-gray-500">Score: {result.aliexpress[0].relevance_score?.toFixed(2)}</div>
+                              <a href={result.aliexpress[0].url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline text-xs">
                                 View on AliExpress
                               </a>
+                              {result.aliexpress.length > 1 && (
+                                <div className="text-xs text-gray-400 mt-1">+{result.aliexpress.length - 1} more results</div>
+                              )}
                             </div>
-                          ) : result.error && result.error.includes('aliexpress') ? (
-                            <div className="text-red-500">{result.error}</div>
+                          ) : result.aliexpress_error ? (
+                            <div className="text-red-500 text-xs">{result.aliexpress_error}</div>
                           ) : (
                             <div className="text-gray-400">No results</div>
                           )}

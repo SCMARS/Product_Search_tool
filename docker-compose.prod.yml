@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  # Backend сервис для продакшена
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: product-search-backend-prod
+    environment:
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+      - CAPTCHA_API_KEY=${CAPTCHA_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    networks:
+      - product-search-network
+
+  # Frontend сервис для продакшена
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: product-search-frontend-prod
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    networks:
+      - product-search-network
+
+  # Redis для кэширования
+  redis:
+    image: redis:7-alpine
+    container_name: product-search-redis-prod
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    restart: always
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+    networks:
+      - product-search-network
+
+  # Nginx Load Balancer (если нужно масштабирование)
+  nginx:
+    image: nginx:alpine
+    container_name: product-search-nginx
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - frontend
+    restart: always
+    networks:
+      - product-search-network
+
+networks:
+  product-search-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local

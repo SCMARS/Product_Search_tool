@@ -11,19 +11,151 @@ import threading
 import pandas as pd
 from PIL import Image
 from dotenv import load_dotenv
-from allegro import search_allegro
+
+from allegro import search_allegro_improved as search_allegro
 from amazon import search_amazon
 from aliexpress import search_aliexpress
 
-# Load environment variables
+
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000"], supports_credentials=True, allow_headers=["Content-Type"], methods=["GET", "POST", "OPTIONS"])
+CORS(app, origins=["http://localhost:3001"], supports_credentials=True, allow_headers=["Content-Type"], methods=["GET", "POST", "OPTIONS"])
 
 @app.route('/')
 def index():
     return jsonify({"message": "Welcome to the Product Search API. Use /api/search endpoint to search for products."})
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint для Docker"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': time.time(),
+        'version': '1.0.0',
+        'services': {
+            'flask': 'running',
+            'playwright': 'available'
+        }
+    })
+
+@app.route('/api/generate-product-description', methods=['POST'])
+def generate_product_description():
+    """Генерирует описание товара через OpenAI API"""
+    print("=== Product Description Generation Request ===")
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    # Извлекаем данные товара
+    product_name = data.get('name', '')
+    product_price = data.get('price', '')
+    product_url = data.get('url', '')
+    product_image = data.get('image', '')
+    source_platform = data.get('source', 'Unknown')
+
+    if not product_name:
+        return jsonify({'error': 'Product name is required'}), 400
+
+    print(f"Generating description for: {product_name[:50]}...")
+    print(f"Source: {source_platform}")
+    print(f"Price: {product_price}")
+
+    # Получаем OpenAI API ключ
+    openai_api_key = os.getenv('OPENAI_API_KEY')
+    if not openai_api_key:
+        return jsonify({'error': 'OpenAI API key not configured'}), 500
+
+    try:
+        # Создаем промпт для генерации описания
+        prompt = f"""
+Создай профессиональное описание товара для интернет-магазина на основе следующей информации:
+
+Название товара: {product_name}
+Цена: {product_price}
+Источник: {source_platform}
+
+Требования к описанию:
+1. Напиши привлекательное и информативное описание на русском языке
+2. Выдели ключевые особенности и преимущества товара
+3. Используй продающий стиль текста
+4. Добавь информацию о качестве и надежности
+5. Упомяни возможные варианты использования
+6. Сделай описание длиной 150-300 слов
+7. Используй эмодзи для привлекательности
+8. Структурируй текст с абзацами
+
+Создай описание, которое поможет покупателю принять решение о покупке.
+"""
+
+        # Отправляем запрос к OpenAI
+        response = requests.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers={
+                'Authorization': f'Bearer {openai_api_key}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': 'gpt-4o-mini',  # Используем более экономичную модель
+                'messages': [
+                    {
+                        'role': 'system',
+                        'content': 'Ты профессиональный копирайтер, специализирующийся на создании продающих описаний товаров для интернет-магазинов. Твоя задача - создавать привлекательные, информативные и убедительные описания, которые помогают покупателям принять решение о покупке.'
+                    },
+                    {
+                        'role': 'user',
+                        'content': prompt
+                    }
+                ],
+                'max_tokens': 500,
+                'temperature': 0.7
+            },
+            timeout=30
+        )
+
+        response.raise_for_status()
+        result = response.json()
+
+        generated_description = result['choices'][0]['message']['content']
+
+        print("✅ Description generated successfully")
+
+        return jsonify({
+            'success': True,
+            'description': generated_description,
+            'product_info': {
+                'name': product_name,
+                'price': product_price,
+                'source': source_platform
+            }
+        })
+
+    except requests.exceptions.RequestException as e:
+        print(f"OpenAI API error: {e}")
+
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                error_detail = e.response.json()
+                error_message = error_detail.get('error', {}).get('message', 'Unknown API error')
+
+                if 'rate limit' in error_message.lower():
+                    return jsonify({'error': 'Rate limit exceeded. Please try again later.'}), 429
+                elif 'invalid api key' in error_message.lower():
+                    return jsonify({'error': 'Invalid OpenAI API key'}), 500
+                else:
+                    return jsonify({'error': f'OpenAI API error: {error_message}'}), 500
+
+            except Exception as parse_error:
+                return jsonify({'error': 'Could not process OpenAI API response'}), 500
+
+        return jsonify({'error': f'Failed to generate description: {str(e)}'}), 500
+
+    except Exception as e:
+        print(f"Error generating description: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
 
 @app.route('/api/search', methods=['POST'])
 def search():
@@ -34,33 +166,50 @@ def search():
     query = data['query']
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        allegro_future = executor.submit(search_allegro, query)
-        amazon_future = executor.submit(search_amazon, query)
+        # ВРЕМЕННО отключаем Allegro для быстрого тестирования Amazon
+        def search_allegro_with_fallback(query):
+            print(f"🚫 Allegro временно отключен для тестирования")
+            return []
+
+
+        # Запускаем поиск по всем платформам параллельно
+        allegro_future = executor.submit(search_allegro_with_fallback, query)
+        amazon_future = executor.submit(search_amazon, query, limit=10, max_pages=2)
         aliexpress_future = executor.submit(search_aliexpress, query)
 
+        # Получаем результаты Allegro
         try:
             allegro_results = allegro_future.result()
+            print(f"Allegro results count: {len(allegro_results)}")
         except Exception as e:
             print(f"Allegro search error: {e}")
             allegro_results = []
 
         try:
             amazon_results = amazon_future.result()
+            print(f"Amazon results count: {len(amazon_results)}")
+            if amazon_results:
+                print(f"First Amazon result: {amazon_results[0].get('name', 'No name')[:50]}...")
         except Exception as e:
             print(f"Amazon search error: {e}")
             amazon_results = []
 
         try:
             aliexpress_results = aliexpress_future.result()
+            print(f"Aliexpress results count: {len(aliexpress_results)}")
         except Exception as e:
             print(f"Aliexpress search error: {e}")
             aliexpress_results = []
 
-    return jsonify({
+    response_data = {
         'allegro': allegro_results,
         'amazon': amazon_results,
         'aliexpress': aliexpress_results
-    })
+    }
+
+    print(f"Total response: Allegro={len(allegro_results)}, Amazon={len(amazon_results)}, AliExpress={len(aliexpress_results)}")
+
+    return jsonify(response_data)
 
 @app.route('/api/generate-image', methods=['POST'])
 def generate_image():
@@ -425,59 +574,85 @@ def analyze_image():
 
 def process_csv(df):
     """
-    Process a DataFrame containing product names.
-    For each product, search on Amazon, Allegro, and AliExpress.
+    Process a DataFrame containing product characteristics.
+    For each product, search on Amazon, Allegro, and AliExpress using enhanced matching.
     Save results to results.json.
 
     Args:
-        df (pandas.DataFrame): DataFrame with a 'product' column
+        df (pandas.DataFrame): DataFrame with product characteristics
+    """
+    try:
+        # Пытаемся использовать улучшенный ProductMatcher
+        from product_matcher import ProductMatcher
+
+        # Создаем временный файл для обработки
+        temp_file = 'temp_upload.csv'
+        df.to_csv(temp_file, index=False, encoding='utf-8')
+
+        # Используем ProductMatcher для обработки
+        matcher = ProductMatcher()
+        results = matcher.process_file(temp_file, 'results.json')
+
+        # Удаляем временный файл
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+
+        print(f"Enhanced processing completed: {len(results)} products processed")
+
+    except Exception as e:
+        print(f"Error in enhanced processing: {e}")
+        # Fallback to simple processing
+        process_csv_simple(df)
+
+def process_csv_simple(df):
+    """
+    Простая обработка CSV файла (fallback)
     """
     results = []
 
+    # Determine which column to use for product names
+    product_column = None
+    for col in ['product', 'product_name', 'название', 'name']:
+        if col in df.columns:
+            product_column = col
+            break
+
+    if not product_column:
+        print("Не найдена колонка с названием товара")
+        return
+
     for index, row in df.iterrows():
-        product_name = row['product']
-        product_result = {"product": product_name}
+        product_name = row[product_column]
+        if pd.isna(product_name) or str(product_name).strip() == '':
+            continue
+
+        product_result = {"product": str(product_name), "row_index": index + 1}
 
         try:
             # Search Amazon
             try:
-                amazon_results = search_amazon(product_name, limit=1)
-                if amazon_results:
-                    product_result["amazon"] = {
-                        "name": amazon_results[0]["name"],
-                        "price": amazon_results[0]["price"],
-                        "url": amazon_results[0]["url"]
-                    }
+                amazon_results = search_amazon(str(product_name), max_pages=1)
+                product_result["amazon"] = amazon_results[:5]  # Limit to 5 results
+                print(f"Amazon: found {len(amazon_results)} products for {product_name}")
             except Exception as e:
-                product_result["error"] = f"Timeout while fetching amazon: {str(e)}"
+                product_result["amazon_error"] = str(e)
                 print(f"Error searching Amazon for {product_name}: {e}")
 
-            # Search Allegro
+            # Search Allegro (temporarily disabled)
             try:
-                allegro_results = search_allegro(product_name, limit=1)
-                if allegro_results:
-                    product_result["allegro"] = {
-                        "name": allegro_results[0]["name"],
-                        "price": allegro_results[0]["price"],
-                        "url": allegro_results[0]["url"]
-                    }
+                print("🚫 Allegro временно отключен для тестирования")
+                product_result["allegro"] = []
             except Exception as e:
-                if "error" not in product_result:
-                    product_result["error"] = f"Timeout while fetching allegro: {str(e)}"
+                product_result["allegro_error"] = str(e)
                 print(f"Error searching Allegro for {product_name}: {e}")
 
             # Search AliExpress
             try:
-                aliexpress_results = search_aliexpress(product_name, limit=1)
-                if aliexpress_results:
-                    product_result["aliexpress"] = {
-                        "name": aliexpress_results[0]["name"],
-                        "price": aliexpress_results[0]["price"],
-                        "url": aliexpress_results[0]["url"]
-                    }
+                aliexpress_results = search_aliexpress_api(str(product_name), limit=5)
+                product_result["aliexpress"] = aliexpress_results
+                print(f"AliExpress: found {len(aliexpress_results)} products for {product_name}")
             except Exception as e:
-                if "error" not in product_result:
-                    product_result["error"] = f"Timeout while fetching aliexpress: {str(e)}"
+                product_result["aliexpress_error"] = str(e)
                 print(f"Error searching AliExpress for {product_name}: {e}")
 
         except Exception as e:
@@ -487,7 +662,7 @@ def process_csv(df):
         results.append(product_result)
 
         # Sleep to avoid rate limiting
-        time.sleep(0.5)
+        time.sleep(1)
 
     # Save results to results.json
     try:
@@ -500,9 +675,16 @@ def process_csv(df):
 @app.route('/api/upload-csv', methods=['POST'])
 def upload_csv():
     """
-    Endpoint to upload and process a CSV file containing product names.
+    Endpoint to upload and process a CSV or Excel file containing product characteristics.
 
-    The CSV file must have a 'product' column.
+    The file can contain various columns like:
+    - product, product_name, название, name (for product names)
+    - brand, бренд, марка (for brands)
+    - category, категория (for categories)
+    - color, цвет (for colors)
+    - size, размер (for sizes)
+    - keywords, ключевые_слова (for additional keywords)
+
     Processing is done in a background thread.
 
     Returns:
@@ -518,21 +700,30 @@ def upload_csv():
     if file.filename == '':
         return jsonify({'error': 'Empty file provided'}), 400
 
-    # Check if the file is a CSV
-    if not file.filename.lower().endswith('.csv'):
-        return jsonify({'error': 'File must be a CSV'}), 400
+    # Check if the file is CSV or Excel
+    allowed_extensions = ['.csv', '.xlsx', '.xls']
+    if not any(file.filename.lower().endswith(ext) for ext in allowed_extensions):
+        return jsonify({'error': 'File must be CSV (.csv) or Excel (.xlsx, .xls)'}), 400
 
     try:
-        # Read the CSV file
-        df = pd.read_csv(file)
+        # Read the file based on extension
+        if file.filename.lower().endswith('.csv'):
+            df = pd.read_csv(file, encoding='utf-8')
+        else:
+            df = pd.read_excel(file)
 
-        # Check if either 'product' or 'product_name' column exists
-        if 'product' not in df.columns and 'product_name' not in df.columns:
-            return jsonify({'error': 'CSV file must contain either a "product" or "product_name" column'}), 400
+        # Check if we have at least one column that could contain product information
+        product_columns = ['product', 'product_name', 'название', 'name', 'brand', 'бренд']
+        has_product_info = any(col in df.columns for col in product_columns)
 
-        # If only product_name exists, rename it to product for consistency
-        if 'product_name' in df.columns and 'product' not in df.columns:
-            df = df.rename(columns={'product_name': 'product'})
+        if not has_product_info:
+            return jsonify({
+                'error': 'File must contain at least one of these columns: product, product_name, название, name, brand, бренд'
+            }), 400
+
+        # Log available columns for debugging
+        print(f"Available columns: {list(df.columns)}")
+        print(f"Processing {len(df)} rows")
 
         # Start background processing
         thread = threading.Thread(target=process_csv, args=(df,))
@@ -542,7 +733,8 @@ def upload_csv():
         return jsonify({
             'success': True,
             'message': f'Processing {len(df)} products in the background',
-            'products_count': len(df)
+            'products_count': len(df),
+            'columns': list(df.columns)
         })
 
     except Exception as e:
@@ -579,5 +771,83 @@ def get_csv_results():
             'message': f'Error retrieving results: {str(e)}'
         }), 500
 
+@app.route('/api/files', methods=['GET'])
+def list_files():
+    """List all files in the uploads directory"""
+    try:
+        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        if not os.path.exists(uploads_dir):
+            os.makedirs(uploads_dir)
+
+        files = []
+        for filename in os.listdir(uploads_dir):
+            if filename.endswith(('.csv', '.xlsx', '.json')):
+                filepath = os.path.join(uploads_dir, filename)
+                file_stats = os.stat(filepath)
+                files.append({
+                    'name': filename,
+                    'size': file_stats.st_size,
+                    'modified': time.ctime(file_stats.st_mtime),
+                    'type': filename.split('.')[-1].upper()
+                })
+
+        return jsonify({
+            'success': True,
+            'files': files
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/files/<filename>', methods=['DELETE'])
+def delete_file(filename):
+    """Delete a specific file"""
+    try:
+        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        filepath = os.path.join(uploads_dir, filename)
+
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            return jsonify({
+                'success': True,
+                'message': f'File {filename} deleted successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'File not found'
+            }), 404
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/files/<filename>/download', methods=['GET'])
+def download_file(filename):
+    """Download a specific file"""
+    try:
+        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        filepath = os.path.join(uploads_dir, filename)
+
+        if os.path.exists(filepath):
+            from flask import send_file
+            return send_file(filepath, as_attachment=True)
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'File not found'
+            }), 404
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 if __name__ == '__main__':
-    app.run(debug=True, host='127.0.0.1', port=5001)
+    # Определяем режим запуска
+    debug_mode = os.getenv('FLASK_ENV') != 'production'
+    host = '0.0.0.0' if os.getenv('FLASK_ENV') == 'production' else '127.0.0.1'
+    app.run(debug=debug_mode, host=host, port=5003)

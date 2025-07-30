@@ -44,3 +44,20 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+
+# Docker
+docker-compose.override.yml
+.docker/
+logs/
+temp/
+
+# Production files
+results.json
+debug-report.txt
+*.log
+
+# Debug files
+debug_*.html
+debug_*.png
+captcha_*.html
+captcha_*.png
