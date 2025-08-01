@@ -37,14 +37,12 @@ const ResultCard = ({ product }) => {
     setGeneratingImage(true);
     setImageError(null);
 
-    // Get description for image generation
-    const description = product.description 
-      ? product.description 
-      : `${product.name}, ${product.price}`;
+    // Use only the product name for image generation
+    const productName = product.name;
 
     try {
       const response = await axios.post('http://127.0.0.1:5001/api/generate-image', {
-        description: description
+        description: productName
       }, {
         headers: {
           'Content-Type': 'application/json'

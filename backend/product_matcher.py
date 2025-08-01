@@ -230,11 +230,13 @@ class ProductMatcher:
             logger.error(f"Ошибка поиска на AliExpress: {e}")
             result['aliexpress_error'] = str(e)
         
-        # Поиск на Allegro (временно отключен для быстрого тестирования)
+        # Поиск на Allegro с улучшенными методами
         try:
-            logger.info(f"Allegro временно отключен для быстрого тестирования")
-            result['allegro'] = []
-            logger.info(f"Allegro: пропущен")
+            logger.info(f"Поиск на Allegro: {query}")
+            allegro_products = search_allegro_improved(query, max_pages=1)
+            filtered_allegro = self.filter_relevant_products(allegro_products, query, characteristics)
+            result['allegro'] = filtered_allegro
+            logger.info(f"Allegro: найдено {len(filtered_allegro)} релевантных товаров")
         except Exception as e:
             logger.error(f"Ошибка поиска на Allegro: {e}")
             result['allegro_error'] = str(e)

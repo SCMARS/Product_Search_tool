@@ -25,20 +25,7 @@ function App() {
   const [, updateState] = useState();
   const forceUpdate = useCallback(() => updateState({}), []);
 
-  // Автоматический поиск с задержкой (debounce)
-  useEffect(() => {
-    const delayedSearch = setTimeout(() => {
-      if (query.trim().length > 4) { // Поиск только если больше 2 символов
-        performSearch();
-      } else {
-        setResults(null); // Очистить результаты если запрос короткий
-      }
-    }, 500); // Задержка 500ms
-
-    return () => clearTimeout(delayedSearch); // Очистка таймера
-  }, [query]); // Запускается при изменении query
-
-  const performSearch = async () => {
+  const performSearch = useCallback(async () => {
     if (!query.trim()) return;
 
     setLoading(true);
@@ -46,7 +33,7 @@ function App() {
 
     try {
    //api/search
-      const response = await axios.post('http://127.0.0.1:5003/api/search', {
+      const response = await axios.post('http://127.0.0.1:5001/api/search', {
         query: query.trim()
       }, {
         headers: {
@@ -68,7 +55,20 @@ function App() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [query]);
+
+  // Автоматический поиск с задержкой (debounce)
+  useEffect(() => {
+    const delayedSearch = setTimeout(() => {
+      if (query.trim().length > 4) { // Поиск только если больше 2 символов
+        performSearch();
+      } else {
+        setResults(null); // Очистить результаты если запрос короткий
+      }
+    }, 500); // Задержка 500ms
+
+    return () => clearTimeout(delayedSearch); // Очистка таймера
+  }, [query, performSearch]); // Добавляем performSearch в зависимости
 
   const fetchCsvResults = async () => {
     // Reset states
@@ -77,7 +77,7 @@ function App() {
     setCsvResults(null);
 
     try {
-      const response = await axios.get('http://127.0.0.1:5003/api/csv-results', {
+      const response = await axios.get('http://127.0.0.1:5001/api/csv-results', {
         timeout: 10000
       });
 
@@ -137,11 +137,11 @@ function App() {
     formData.append('file', file);
 
     try {
-      const response = await axios.post('http://127.0.0.1:5003/api/upload-csv', formData, {
+      const response = await axios.post('http://127.0.0.1:5001/api/upload-csv', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         },
-        timeout: 30000 // 30 seconds timeout
+        timeout: 30000
       });
 
       setCsvUploadSuccess(true);
@@ -170,7 +170,7 @@ function App() {
       <div className="min-h-screen bg-gray-100">
         <div className="container mx-auto px-4 py-8">
           <h1 className="text-3xl font-bold text-center mb-8 text-blue-600">
-            Product Search Tool
+            Інструмент пошуку товарів
           </h1>
 
           <SearchInput
@@ -180,15 +180,15 @@ function App() {
           />
 
           <div className="mt-2 text-sm text-gray-500 text-center">
-            {query.length > 2 ? 'Searching automatically...' : 'Type at least 3 characters to search'}
+            {query.length > 2 ? 'Автоматичний пошук...' : 'Введіть принаймні 3 символи для пошуку'}
           </div>
 
           {/* CSV Upload Section */}
           <div className="mt-8 p-4 bg-white rounded-lg shadow-md">
-            <h2 className="text-xl font-semibold mb-3">Upload Product File</h2>
+            <h2 className="text-xl font-semibold mb-3">Завантажити файл товарів</h2>
             <p className="text-sm text-gray-600 mb-4">
-              Upload a CSV or Excel file with product characteristics (name, brand, category, color, etc.)
-              to search for multiple products at once. Results will be saved to results.json on the server.
+              Завантажте CSV або Excel файл з характеристиками товарів (назва, бренд, категорія, колір тощо)
+              для пошуку кількох товарів одночасно. Результати будуть збережені у файл results.json на сервері.
             </p>
 
             <div className="flex flex-col md:flex-row md:items-center md:space-x-4">
@@ -197,12 +197,12 @@ function App() {
                   htmlFor="csv-file-input" 
                   className="flex items-center px-4 py-2 bg-blue-50 text-blue-700 rounded-l-md font-semibold text-sm cursor-pointer hover:bg-blue-100"
                 >
-                  Choose File
+                  Обрати файл
                 </label>
                 <span className="flex-grow px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm rounded-r-md">
-                  {fileInputRef.current && fileInputRef.current.files && fileInputRef.current.files[0] 
-                    ? fileInputRef.current.files[0].name 
-                    : "No file selected"}
+                  {fileInputRef.current && fileInputRef.current.files && fileInputRef.current.files[0]
+                    ? fileInputRef.current.files[0].name
+                    : "Файл не обрано"}
                 </span>
                 <input
                   id="csv-file-input"
@@ -225,7 +225,7 @@ function App() {
                   focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50
                   disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {csvUploading ? 'Uploading...' : 'Upload File'}
+                {csvUploading ? 'Завантаження...' : 'Завантажити файл'}
               </button>
             </div>
 
@@ -237,17 +237,17 @@ function App() {
 
             {csvUploadSuccess && (
               <div className="mt-3 p-3 bg-green-100 text-green-700 rounded-md text-sm">
-                Successfully uploaded CSV with {csvProductsCount} products. 
-                Processing in background. Results will be saved to results.json on the server.
+                Успішно завантажено CSV з {csvProductsCount} товарами.
+                Обробка у фоновому режимі. Результати будуть збережені у файл results.json на сервері.
                 <div className="mt-2">
                   <button
                     onClick={fetchCsvResults}
                     disabled={csvResultsLoading}
-                    className="py-1 px-3 bg-green-600 text-white rounded-md hover:bg-green-700 
+                    className="py-1 px-3 bg-green-600 text-white rounded-md hover:bg-green-700
                       focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50
                       disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                   >
-                    {csvResultsLoading ? 'Loading Results...' : 'View Results'}
+                    {csvResultsLoading ? 'Завантаження результатів...' : 'Переглянути результати'}
                   </button>
                 </div>
               </div>
@@ -263,25 +263,25 @@ function App() {
           {/* CSV Results Section */}
           {csvResults && csvResults.length > 0 && (
             <div className="mt-8 p-4 bg-white rounded-lg shadow-md">
-              <h2 className="text-xl font-semibold mb-3">File Processing Results</h2>
+              <h2 className="text-xl font-semibold mb-3">Результати обробки файлу</h2>
               <div className="mb-4 p-3 bg-gray-50 rounded-md">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                   <div>
-                    <span className="font-medium text-gray-700">Products:</span>
+                    <span className="font-medium text-gray-700">Товарів:</span>
                     <span className="ml-1 text-blue-600">{csvResults.length}</span>
                   </div>
                   <div>
-                    <span className="font-medium text-gray-700">Success Rate:</span>
+                    <span className="font-medium text-gray-700">Успішність:</span>
                     <span className="ml-1 text-green-600">100%</span>
                   </div>
                   <div>
-                    <span className="font-medium text-gray-700">Amazon Results:</span>
+                    <span className="font-medium text-gray-700">Результати Amazon:</span>
                     <span className="ml-1 text-orange-600">
                       {csvResults.filter(r => r.amazon && r.amazon.length > 0).length}
                     </span>
                   </div>
                   <div>
-                    <span className="font-medium text-gray-700">Total Found:</span>
+                    <span className="font-medium text-gray-700">Всього знайдено:</span>
                     <span className="ml-1 text-purple-600">
                       {csvResults.reduce((sum, r) => sum + (r.amazon?.length || 0) + (r.allegro?.length || 0) + (r.aliexpress?.length || 0), 0)}
                     </span>
@@ -294,7 +294,7 @@ function App() {
                   <thead>
                     <tr>
                       <th className="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                        Product
+                        Товар
                       </th>
                       <th className="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
                         Amazon
@@ -329,16 +329,16 @@ function App() {
                               <div className="text-green-600 font-semibold">{result.amazon[0].price}</div>
                               <div className="text-xs text-gray-500">Score: {result.amazon[0].relevance_score?.toFixed(2)}</div>
                               <a href={result.amazon[0].url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline text-xs">
-                                View on Amazon
+                                Переглянути на Amazon
                               </a>
                               {result.amazon.length > 1 && (
-                                <div className="text-xs text-gray-400 mt-1">+{result.amazon.length - 1} more results</div>
+                                <div className="text-xs text-gray-400 mt-1">+{result.amazon.length - 1} ще результатів</div>
                               )}
                             </div>
                           ) : result.amazon_error ? (
                             <div className="text-red-500 text-xs">{result.amazon_error}</div>
                           ) : (
-                            <div className="text-gray-400">No results</div>
+                            <div className="text-gray-400">Немає результатів</div>
                           )}
                         </td>
                         <td className="py-2 px-4 border-b border-gray-200 text-sm">
@@ -348,10 +348,10 @@ function App() {
                               <div className="text-green-600 font-semibold">{result.allegro[0].price}</div>
                               <div className="text-xs text-gray-500">Score: {result.allegro[0].relevance_score?.toFixed(2)}</div>
                               <a href={result.allegro[0].url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline text-xs">
-                                View on Allegro
+                                Переглянути на Allegro
                               </a>
                               {result.allegro.length > 1 && (
-                                <div className="text-xs text-gray-400 mt-1">+{result.allegro.length - 1} more results</div>
+                                <div className="text-xs text-gray-400 mt-1">+{result.allegro.length - 1} ще результатів</div>
                               )}
                             </div>
                           ) : result.allegro_error ? (
@@ -367,10 +367,10 @@ function App() {
                               <div className="text-green-600 font-semibold">{result.aliexpress[0].price}</div>
                               <div className="text-xs text-gray-500">Score: {result.aliexpress[0].relevance_score?.toFixed(2)}</div>
                               <a href={result.aliexpress[0].url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline text-xs">
-                                View on AliExpress
+                                Переглянути на AliExpress
                               </a>
                               {result.aliexpress.length > 1 && (
-                                <div className="text-xs text-gray-400 mt-1">+{result.aliexpress.length - 1} more results</div>
+                                <div className="text-xs text-gray-400 mt-1">+{result.aliexpress.length - 1} ще результатів</div>
                               )}
                             </div>
                           ) : result.aliexpress_error ? (
@@ -407,20 +407,9 @@ function App() {
 
           {results && !loading && (
               <div className="mt-8">
-                <h2 className="text-2xl font-semibold mb-4">Search Results for "{query}"</h2>
+                <h2 className="text-2xl font-semibold mb-4">Результати пошуку для "{query}"</h2>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div>
-                    <h3 className="text-xl font-medium mb-3 text-blue-500">Allegro</h3>
-                    {results.allegro && results.allegro.length > 0 ? (
-                        results.allegro.map((product, index) => (
-                            <ResultCard key={`allegro-${index}`} product={product} />
-                        ))
-                    ) : (
-                        <p className="text-gray-500">No products found on Allegro</p>
-                    )}
-                  </div>
-
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <h3 className="text-xl font-medium mb-3 text-blue-500">Amazon</h3>
                     {results.amazon && results.amazon.length > 0 ? (

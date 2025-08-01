@@ -14,13 +14,13 @@ from dotenv import load_dotenv
 
 from allegro import search_allegro_improved as search_allegro
 from amazon import search_amazon
-from aliexpress import search_aliexpress
+from aliexpress import search_aliexpress, search_aliexpress_api
 
 
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3001"], supports_credentials=True, allow_headers=["Content-Type"], methods=["GET", "POST", "OPTIONS"])
+CORS(app, origins=["http://localhost:3000"], supports_credentials=True, allow_headers=["Content-Type", "Authorization", "X-Requested-With"], methods=["GET", "POST", "OPTIONS", "DELETE"], expose_headers=["Content-Disposition"])
 
 @app.route('/')
 def index():
@@ -41,14 +41,14 @@ def health_check():
 
 @app.route('/api/generate-product-description', methods=['POST'])
 def generate_product_description():
-    """Генерирует описание товара через OpenAI API"""
+
     print("=== Product Description Generation Request ===")
     data = request.get_json()
 
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
-    # Извлекаем данные товара
+
     product_name = data.get('name', '')
     product_price = data.get('price', '')
     product_url = data.get('url', '')
@@ -62,10 +62,43 @@ def generate_product_description():
     print(f"Source: {source_platform}")
     print(f"Price: {product_price}")
 
-    # Получаем OpenAI API ключ
+
     openai_api_key = os.getenv('OPENAI_API_KEY')
     if not openai_api_key:
-        return jsonify({'error': 'OpenAI API key not configured'}), 500
+        # Если API ключ не настроен, возвращаем базовое описание
+        basic_description = f"""
+📱 **{product_name}**
+
+🔹 **Основные характеристики:**
+• Высокое качество и надежность
+• Современные технологии
+• Отличное соотношение цена/качество
+
+🔹 **Преимущества:**
+• Проверенный производитель
+• Гарантия качества
+• Быстрая доставка
+
+🔹 **Применение:**
+Подходит для повседневного использования и профессиональных задач.
+
+💡 **Рекомендация:** Для получения более детального AI-описания настройте OpenAI API ключ в файле .env
+
+---
+*Источник: {source_platform}*
+*Цена: {product_price}*
+        """.strip()
+        
+        return jsonify({
+            'success': True,
+            'description': basic_description,
+            'product_info': {
+                'name': product_name,
+                'price': product_price,
+                'source': source_platform
+            },
+            'note': 'Basic description generated. Set OPENAI_API_KEY for AI-powered descriptions.'
+        })
 
     try:
         # Создаем промпт для генерации описания
@@ -85,6 +118,10 @@ def generate_product_description():
 6. Сделай описание длиной 150-300 слов
 7. Используй эмодзи для привлекательности
 8. Структурируй текст с абзацами
+9. Опиши товар максимально точно, основываясь на его названии
+10. Не добавляй информацию, которой нет в названии товара
+
+ВАЖНО: Описание должно точно соответствовать названию товара. Если в названии указан конкретный товар (например, iPhone 15 Pro Max), то описание должно быть именно об этом товаре, а не о других моделях.
 
 Создай описание, которое поможет покупателю принять решение о покупке.
 """
@@ -101,15 +138,15 @@ def generate_product_description():
                 'messages': [
                     {
                         'role': 'system',
-                        'content': 'Ты профессиональный копирайтер, специализирующийся на создании продающих описаний товаров для интернет-магазинов. Твоя задача - создавать привлекательные, информативные и убедительные описания, которые помогают покупателям принять решение о покупке.'
+                        'content': 'Ты профессиональный копирайтер, специализирующийся на создании продающих описаний товаров для интернет-магазинов. Твоя задача - создавать привлекательные, информативные и убедительные описания, которые точно соответствуют названию товара и помогают покупателям принять решение о покупке.'
                     },
                     {
                         'role': 'user',
                         'content': prompt
                     }
                 ],
-                'max_tokens': 500,
-                'temperature': 0.7
+                'max_tokens': 600,
+                'temperature': 0.5
             },
             timeout=30
         )
@@ -165,42 +202,33 @@ def search():
 
     query = data['query']
 
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        # ВРЕМЕННО отключаем Allegro для быстрого тестирования Amazon
-        def search_allegro_with_fallback(query):
-            print(f"🚫 Allegro временно отключен для тестирования")
-            return []
+    # Запускаем поиск на всех платформах параллельно
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        # Отключаем Allegro временно
+        # allegro_future = executor.submit(search_allegro_with_fallback, query)
+        amazon_future = executor.submit(search_amazon, query, limit=10)
+        aliexpress_future = executor.submit(search_aliexpress, query, limit=10)
 
+        # Получаем результаты
+        # allegro_results = allegro_future.result()
+        amazon_results = amazon_future.result()
+        aliexpress_results = aliexpress_future.result()
 
-        # Запускаем поиск по всем платформам параллельно
-        allegro_future = executor.submit(search_allegro_with_fallback, query)
-        amazon_future = executor.submit(search_amazon, query, limit=10, max_pages=2)
-        aliexpress_future = executor.submit(search_aliexpress, query)
+    # Временно отключаем Allegro
+    allegro_results = []
 
-        # Получаем результаты Allegro
-        try:
-            allegro_results = allegro_future.result()
-            print(f"Allegro results count: {len(allegro_results)}")
-        except Exception as e:
-            print(f"Allegro search error: {e}")
-            allegro_results = []
+    # Дополнительная сортировка результатов по релевантности
+    def sort_by_relevance(results):
+        if not results:
+            return results
+        return sorted(results, key=lambda x: x.get('relevance_score', 0), reverse=True)
 
-        try:
-            amazon_results = amazon_future.result()
-            print(f"Amazon results count: {len(amazon_results)}")
-            if amazon_results:
-                print(f"First Amazon result: {amazon_results[0].get('name', 'No name')[:50]}...")
-        except Exception as e:
-            print(f"Amazon search error: {e}")
-            amazon_results = []
+    # Сортируем результаты по релевантности
+    allegro_results = sort_by_relevance(allegro_results)
+    amazon_results = sort_by_relevance(amazon_results)
+    aliexpress_results = sort_by_relevance(aliexpress_results)
 
-        try:
-            aliexpress_results = aliexpress_future.result()
-            print(f"Aliexpress results count: {len(aliexpress_results)}")
-        except Exception as e:
-            print(f"Aliexpress search error: {e}")
-            aliexpress_results = []
-
+    # Формируем ответ
     response_data = {
         'allegro': allegro_results,
         'amazon': amazon_results,
@@ -208,6 +236,7 @@ def search():
     }
 
     print(f"Total response: Allegro={len(allegro_results)}, Amazon={len(amazon_results)}, AliExpress={len(aliexpress_results)}")
+    print("✅ Результаты отсортированы по релевантности")
 
     return jsonify(response_data)
 
@@ -230,14 +259,23 @@ def generate_image():
 
     print(f"Using OpenAI API key: {openai_api_key[:10]}...")
 
-    # Validate the API key format
-    if not ((openai_api_key.startswith('sk-') or openai_api_key.startswith('sk-proj-')) and len(openai_api_key) > 20):
-        print(f"Warning: OpenAI API key may not be in the correct format: {openai_api_key[:10]}...")
-        # Continue anyway as the format might be valid for certain account types
-
-    # First try with DALL-E 3, then fall back to DALL-E 2 if needed
+    # Создаем специальный промпт для генерации изображения на основе названия товара
     try:
-        print("Sending request to OpenAI API using DALL-E 3...")
+        # Извлекаем название товара из описания - упрощенная логика
+        product_name = description.strip()
+        
+        # Очищаем название от лишних символов
+        product_name = product_name.replace('(Generalüberholt)', '').replace('(Refurbished)', '').strip()
+        
+        # Ограничиваем длину названия для промпта
+        if len(product_name) > 100:
+            product_name = product_name[:100]
+        
+        # М
+        image_prompt = product_name
+
+        print(f"Generated image prompt: {image_prompt}")
+
         # Call OpenAI API to generate image with DALL-E 3
         response = requests.post(
             'https://api.openai.com/v1/images/generations',
@@ -247,7 +285,7 @@ def generate_image():
             },
             json={
                 'model': 'dall-e-3',  # Use the latest DALL-E model
-                'prompt': description,
+                'prompt': image_prompt,
                 'n': 1,
                 'size': '1024x1024',  # Standard size for DALL-E 3
                 'quality': 'standard',  # Can be 'standard' or 'hd'
@@ -307,107 +345,18 @@ def generate_image():
                     return jsonify({'error': 'The description violates content policy. Please modify your description.'}), 400
                 elif 'billing' in error_message.lower() or 'account' in error_message.lower():
                     return jsonify({'error': 'OpenAI API billing or account issue. Please check your OpenAI account.'}), 402
-                elif 'model' in error_message.lower() or ('parameter' in error_message.lower() and 'model' in error_message.lower()):
-                    # Try fallback without specifying model (use API default)
-                    print("Model parameter issue, trying fallback without specifying model...")
-                    try:
-                        fallback_response = requests.post(
-                            'https://api.openai.com/v1/images/generations',
-                            headers={
-                                'Authorization': f'Bearer {openai_api_key}',
-                                'Content-Type': 'application/json'
-                            },
-                            json={
-                                'prompt': description,
-                                'n': 1,
-                                'size': '512x512',
-                                'response_format': 'url'
-                            },
-                            timeout=30  # 30 seconds timeout
-                        )
-
-                        # Check if the fallback request was successful
-                        fallback_response.raise_for_status()
-
-                        # Extract image URL from fallback response
-                        fallback_result = fallback_response.json()
-                        print(f"Default model fallback response status code: {fallback_response.status_code}")
-
-                        # Check if the fallback response contains the expected data
-                        if 'data' not in fallback_result or not fallback_result['data'] or 'url' not in fallback_result['data'][0]:
-                            print(f"Unexpected API fallback response format: {fallback_result}")
-                            return jsonify({'error': 'Unexpected response format from OpenAI API'}), 500
-
-                        fallback_image_url = fallback_result['data'][0]['url']
-                        print("Successfully generated image URL using default model fallback")
-
-                        return jsonify({'image_url': fallback_image_url})
-                    except Exception as fallback_error:
-                        print(f"Default model fallback also failed: {fallback_error}")
-                        return jsonify({'error': f'OpenAI API model error: {error_message}'}), 500
-                elif status_code == 401:
-                    return jsonify({'error': 'Authentication error with OpenAI API. Please check your API key.'}), 401
-                elif status_code == 403:
-                    # Try fallback to DALL-E 2 if DALL-E 3 is not available
-                    print("DALL-E 3 not available, trying DALL-E 2 as fallback...")
-                    try:
-                        fallback_response = requests.post(
-                            'https://api.openai.com/v1/images/generations',
-                            headers={
-                                'Authorization': f'Bearer {openai_api_key}',
-                                'Content-Type': 'application/json'
-                            },
-                            json={
-                                'model': 'dall-e-2',  # Fallback to DALL-E 2
-                                'prompt': description,
-                                'n': 1,
-                                'size': '512x512',  # Standard size for DALL-E 2
-                                'response_format': 'url'
-                            },
-                            timeout=30  # 30 seconds timeout
-                        )
-
-                        # Check if the fallback request was successful
-                        fallback_response.raise_for_status()
-
-                        # Extract image URL from fallback response
-                        fallback_result = fallback_response.json()
-                        print(f"DALL-E 2 fallback response status code: {fallback_response.status_code}")
-
-                        # Check if the fallback response contains the expected data
-                        if 'data' not in fallback_result or not fallback_result['data'] or 'url' not in fallback_result['data'][0]:
-                            print(f"Unexpected API fallback response format: {fallback_result}")
-                            return jsonify({'error': 'Unexpected response format from OpenAI API'}), 500
-
-                        fallback_image_url = fallback_result['data'][0]['url']
-                        print("Successfully generated image URL using DALL-E 2 fallback")
-
-                        return jsonify({'image_url': fallback_image_url})
-                    except Exception as fallback_error:
-                        print(f"DALL-E 2 fallback also failed: {fallback_error}")
-                        return jsonify({'error': 'Permission denied by OpenAI API. Your account may not have access to image generation.'}), 403
                 else:
-                    return jsonify({'error': f'OpenAI API error: {error_message}'}), 500
-            except Exception as parse_error:
-                print(f"Could not parse error response: {e.response.text}")
-                print(f"Parse error: {parse_error}")
-                return jsonify({'error': f'Could not process the API response (Status: {status_code}). Please try again.'}), 500
+                    return jsonify({'error': f'OpenAI API error: {error_message}'}), status_code
 
-        # If there's no response object or other specific error info
-        print("No response object or other specific error info")
-        return jsonify({'error': f'Failed to generate image: {str(e)}'}), 500
-    except Exception as e:
-        print(f"Error generating image: {e}")
-        import traceback
-        traceback.print_exc()
+            except ValueError:
+                return jsonify({'error': f'OpenAI API error with status code: {status_code}'}), status_code
 
-        # Provide more user-friendly error messages based on the exception
-        if 'memory' in str(e).lower():
-            return jsonify({'error': 'Server memory error while processing the request. Please try again later.'}), 500
-        elif 'timeout' in str(e).lower():
-            return jsonify({'error': 'The request timed out. Please try again later.'}), 504
         else:
-            return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
+            return jsonify({'error': f'OpenAI API error: {str(e)}'}), 500
+
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 @app.route('/api/analyze-image', methods=['POST'])
 def analyze_image():
@@ -648,7 +597,7 @@ def process_csv_simple(df):
 
             # Search AliExpress
             try:
-                aliexpress_results = search_aliexpress_api(str(product_name), limit=5)
+                aliexpress_results = search_aliexpress(str(product_name), limit=5)
                 product_result["aliexpress"] = aliexpress_results
                 print(f"AliExpress: found {len(aliexpress_results)} products for {product_name}")
             except Exception as e:
@@ -846,8 +795,55 @@ def download_file(filename):
             'error': str(e)
         }), 500
 
+@app.route('/api/generate-image-prompt', methods=['POST'])
+def generate_image_prompt():
+    data = request.get_json()
+    if not data or 'product_name' not in data:
+        return jsonify({'error': 'Missing product_name parameter'}), 400
+
+    product_name = data['product_name']
+    openai_api_key = os.getenv('OPENAI_API_KEY')
+    if not openai_api_key:
+        return jsonify({'error': 'OpenAI API key not configured'}), 500
+
+    # Составляем промпт для GPT
+    gpt_prompt = (
+        f"Ты — эксперт по генерации промптов для нейросети DALL-E. "
+        f"Твоя задача — создать короткий, но максимально точный промпт для генерации реалистичного изображения товара по его названию. "
+        f"Пиши только на английском языке. Не добавляй лишних деталей, только то, что явно указано в названии. "
+        f"Если в названии есть цвет или модель — обязательно укажи это. Не добавляй слова вроде 'professional', 'photo', 'white background', 'no watermark', 'e-commerce' и т.д. Просто опиши товар максимально кратко и точно для DALL-E.\n"
+        f"Название товара: {product_name}\n"
+        f"Промпт для DALL-E:"
+    )
+
+    try:
+        response = requests.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers={
+                'Authorization': f'Bearer {openai_api_key}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': 'gpt-3.5-turbo',
+                'messages': [
+                    {'role': 'system', 'content': 'You are a prompt engineer for DALL-E.'},
+                    {'role': 'user', 'content': gpt_prompt}
+                ],
+                'max_tokens': 100,
+                'temperature': 0.2
+            },
+            timeout=30
+        )
+        response.raise_for_status()
+        result = response.json()
+        prompt = result['choices'][0]['message']['content'].strip()
+        return jsonify({'prompt': prompt})
+    except Exception as e:
+        print(f"Error generating image prompt: {e}")
+        return jsonify({'error': 'Failed to generate image prompt'}), 500
+
 if __name__ == '__main__':
     # Определяем режим запуска
     debug_mode = os.getenv('FLASK_ENV') != 'production'
     host = '0.0.0.0' if os.getenv('FLASK_ENV') == 'production' else '127.0.0.1'
-    app.run(debug=debug_mode, host=host, port=5003)
+    app.run(debug=debug_mode, host=host, port=5001)

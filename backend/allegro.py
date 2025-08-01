@@ -15,14 +15,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Импортируем новый скрапер
-try:
-    from allegro_scraper import AllegroParser
-    search_allegro_advanced = None  # Не используем, так как у нас есть AllegroParser
-    logger.info("✅ AllegroParser успешно импортирован")
-except ImportError as e:
-    logger.warning(f"⚠️ Не удалось импортировать AllegroParser: {e}")
-    search_allegro_advanced = None
+
 
 class AllegroScraper:
     def __init__(self):
@@ -95,7 +88,15 @@ class AllegroScraper:
             'кабель': ['cable', 'kabel'],
             'подставка': ['stand', 'podstawka'],
             'сумка': ['bag', 'torba'],
-            'защита': ['protector', 'protection']
+            'защита': ['protector', 'protection'],
+            
+            # Инструменты
+            'silicone caulking tools': ['silicone seam tool', 'caulking tool', 'silicone tool', 'seam tool'],
+            'caulking tools': ['caulking tool', 'seam tool', 'silicone tool'],
+            'silicone tools': ['silicone tool', 'caulking tool', 'seam tool'],
+            'electric mosquito swatter': ['elektrische fliegenklatsche', 'electric fly swatter', 'mosquito killer'],
+            'mosquito swatter': ['fliegenklatsche', 'fly swatter', 'mosquito killer'],
+            'electric fly swatter': ['elektrische fliegenklatsche', 'electric mosquito swatter', 'fly killer']
         }
 
         query_lower = query.lower()
@@ -105,151 +106,399 @@ class AllegroScraper:
         transliteration_bonus = 0
         for ru_word, en_variants in transliteration_map.items():
             if ru_word in query_lower:
-                for variant in en_variants:
-                    if variant in title_lower:
-                        transliteration_bonus = 80.0  # Высокий score для транслитерации
+                for en_variant in en_variants:
+                    if en_variant in title_lower:
+                        transliteration_bonus += 50  # Бонус за транслитерацию
                         break
 
-        query_words = query_lower.split()
-
-        score = transliteration_bonus  # Начинаем с бонуса за транслитерацию
-
-        # 1. Проверка на точное совпадение всего запроса
+        # Базовый алгоритм релевантности
+        score = 0
+        
+        # Точное совпадение всей фразы
         if query_lower in title_lower:
-            score += 100
+            score += 150
+        
+        # Разбиваем на слова
+        query_words = query_lower.split()
+        title_words = title_lower.split()
+        
+        # Подсчитываем совпадающие слова
+        matched_words = 0
+        for q_word in query_words:
+            if len(q_word) > 2:  # Игнорируем короткие слова
+                for t_word in title_words:
+                    if q_word in t_word or t_word in q_word:
+                        matched_words += 1
+                        break
+        
+        # Бонус за совпадающие слова
+        if len(query_words) > 0:
+            match_percentage = matched_words / len(query_words)
+            score += int(match_percentage * 60)
+        
+        # Бонус за порядок слов
+        last_pos = -1
+        ordered_count = 0
+        for q_word in query_words:
+            if len(q_word) > 2:
+                pos = title_lower.find(q_word)
+                if pos > last_pos:
+                    ordered_count += 1
+                    last_pos = pos
+        
+        if len(query_words) > 1:
+            order_bonus = (ordered_count / len(query_words)) * 40
+            score += int(order_bonus)
+        
+        # Бонус за ключевые слова
+        key_words = ['tool', 'kit', 'set', 'professional', 'premium', 'electric', 'electronic']
+        for key_word in key_words:
+            if key_word in title_lower:
+                score += 10
+        
+        # Штраф за нерелевантные слова
+        irrelevant_words = ['case', 'cover', 'protector', 'screen', 'film', 'adapter', 'cable', 'charger']
+        for word in irrelevant_words:
+            if word in title_lower and word not in query_lower:
+                score -= 20
+        
+        # Штраф за слишком длинные названия
+        if len(title) > 200:
+            score -= 25
+        
+        # Штраф за слишком короткие названия
+        if len(title) < 10:
+            score -= 30
+        
+        # Добавляем бонус за транслитерацию
+        score += transliteration_bonus
+        
+        return score
 
-        # 2. Проверяем каждое слово из запроса
-        for query_word in query_words:
-            if len(query_word) >= 2:
-                if query_word in title_lower:
-                    score += len(query_word) * 10
-
-        # 3. Универсальные бонусы за ключевые слова для ВСЕХ категорий
-        key_terms = {
-            # Apple техника - увеличиваем бонусы для iPhone
-            'macbook': 50, 'mac': 30, 'apple': 30, 'iphone': 60, 'ipad': 35,
-            'm4': 40, 'm3': 30, 'm2': 20, 'm1': 15, 'air': 20, 'mini': 15,
-            'pro': 25, 'max': 25, 'chip': 10, '15': 30, '16': 30, '14': 25,
-
-            # Бренды телефонов
-            'samsung': 30, 'xiaomi': 30, 'huawei': 25, 'honor': 25,
-            'oppo': 25, 'vivo': 25, 'realme': 25, 'oneplus': 25,
-            'google': 25, 'pixel': 30, 'nokia': 20, 'motorola': 20,
-
-            # Бренды ноутбуков
-            'dell': 20, 'hp': 20, 'lenovo': 20, 'asus': 20,
-            'acer': 15, 'msi': 20, 'sony': 20, 'lg': 15,
-
-            # Другие бренды
-            'microsoft': 20, 'surface': 25, 'nintendo': 25, 'playstation': 25,
-
-            # Категории товаров
-            'laptop': 20, 'notebook': 20, 'phone': 30, 'telefon': 30,
-            'smartphone': 35, 'tablet': 25, 'watch': 25, 'zegarek': 25,
-            'headphones': 30, 'słuchawki': 30, 'camera': 25, 'aparat': 25,
-
-            # Массажеры
-            'masażer': 60, 'massage': 50, 'masaż': 40, 'massager': 50,
-            'elektryczny': 20, 'wibrujący': 20, 'antycellulitowy': 25,
-            'shiatsu': 30, 'poduszka': 15, 'pistolet': 25,
-
-            # Характеристики
-            'wireless': 15, 'bezprzewodowy': 15, 'bluetooth': 15,
-            'usb': 10, 'type-c': 10, 'lightning': 10,
-            'gaming': 15, 'gamingowy': 15, 'professional': 15
+    def translate_query(self, query: str) -> str:
+        """Простой перевод русских запросов на польский/английский"""
+        translations = {
+            'телефон': 'telefon', 'смартфон': 'smartfon', 'айфон': 'iphone',
+            'самсунг': 'samsung', 'ноутбук': 'laptop', 'компьютер': 'komputer',
+            'планшет': 'tablet', 'наушники': 'słuchawki', 'колонки': 'głośniki',
+            'кофемашина': 'ekspres do kawy', 'пылесос': 'odkurzacz',
+            'холодильник': 'lodówka', 'стиральная машина': 'pralka',
+            'кроссовки': 'buty sportowe', 'куртка': 'kurtka', 'джинсы': 'jeansy',
+            'мебель': 'meble', 'стол': 'stół', 'стул': 'krzesło', 'диван': 'sofa'
         }
 
-        for term, bonus in key_terms.items():
-            if term in title_lower:
-                score += bonus
+        query_lower = query.lower()
+        for ru_word, pl_word in translations.items():
+            if ru_word in query_lower:
+                query_lower = query_lower.replace(ru_word, pl_word)
 
-        # 4. Универсальная система штрафов для ВСЕХ товаров
+        return query_lower
 
-        # Проверяем, есть ли основные ключевые слова из запроса
-        main_keywords_found = 0
-        for query_word in query_words:
-            if len(query_word) >= 2 and query_word in title_lower:
-                main_keywords_found += 1
+    def get_proxy_config(self):
+        """Получение конфигурации прокси с ротацией"""
+        import os
+        import random
 
-        # Контекстная система штрафов - учитываем, что именно ищет пользователь
-        if main_keywords_found > 0:  # Если есть хотя бы одно совпадение
+        # Проверяем переменные окружения для прокси
+        proxy_server = os.getenv('PROXY_SERVER')
+        proxy_username = os.getenv('PROXY_USERNAME')
+        proxy_password = os.getenv('PROXY_PASSWORD')
 
-            # Определяем, что ищет пользователь
-            user_wants_accessory = any(term in query_lower for term in [
-                'чехол', 'case', 'etui', 'cover', 'obudowa', 'pokrowiec', 'hülle',
-                'защита', 'protector', 'folia', 'szkło', 'glass',
-                'кабель', 'cable', 'kabel', 'зарядка', 'charger', 'ładowarka',
-                'подставка', 'stand', 'podstawka', 'сумка', 'bag', 'torba'
-            ])
+        if proxy_server:
+            proxy_config = {
+                'server': proxy_server
+            }
 
-            # Штрафы за аксессуары - ТОЛЬКО если пользователь НЕ ищет аксессуары
-            if not user_wants_accessory:
-                accessory_terms = [
-                    'etui', 'case', 'obudowa', 'cover', 'pokrowiec', 'hülle',
-                    'folia', 'protector', 'szkło', 'glass', 'displayschutzfolie',
-                    'schutzhülle', 'screen', 'protector'
-                ]
+            if proxy_username and proxy_password:
+                proxy_config['username'] = proxy_username
+                proxy_config['password'] = proxy_password
 
-                for term in accessory_terms:
-                    if term in title_lower:
-                        score -= 20  # Уменьшаем штраф за аксессуары с 40 до 20
+            logger.info(f"🌐 Используем настроенный прокси: {proxy_server}")
+            return proxy_config
 
-                # Штрафы за другие аксессуары
-                irrelevant_terms = [
-                    'kabel', 'cable', 'ładowarka', 'charger', 'adapter',
-                    'stand', 'podstawka', 'uchwyt', 'holder', 'mount',
-                    'torba', 'bag', 'plecak', 'backpack', 'tasche'
-                ]
+        # Загружаем список прокси из файла
+        try:
+            proxy_file_path = os.path.join(os.path.dirname(__file__), 'proxy_list.txt')
+            with open(proxy_file_path, 'r') as f:
+                proxy_list = [line.strip() for line in f.readlines() if line.strip()]
 
-                for term in irrelevant_terms:
-                    if term in title_lower:
-                        score -= 30  # Уменьшаем штраф за нерелевантные товары с 60 до 30
+            if proxy_list:
+                # Выбираем случайный прокси
+                selected_proxy_ip = random.choice(proxy_list)
+                selected_proxy = f"http://{selected_proxy_ip}"
+
+                logger.info(f"🌐 Выбран случайный прокси: {selected_proxy}")
+                return {'server': selected_proxy}
+
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось загрузить список прокси: {e}")
+
+        logger.info("🌐 Прокси не настроен, используем прямое подключение")
+        return None
+
+    def change_ip_address(self):
+        """Попытка смены IP адреса"""
+        try:
+            import subprocess
+            import os
+
+            # Метод 1: Перезапуск сетевого интерфейса (требует sudo)
+            vpn_command = os.getenv('VPN_RECONNECT_COMMAND')
+            if vpn_command:
+                logger.info("🔄 Пытаемся сменить IP через VPN...")
+                subprocess.run(vpn_command.split(), timeout=30)
+                import time
+                time.sleep(10)  # Ждем подключения
+                return True
+
+            # Метод 2: Команда для смены IP (зависит от провайдера)
+            ip_change_command = os.getenv('IP_CHANGE_COMMAND')
+            if ip_change_command:
+                logger.info("🔄 Пытаемся сменить IP...")
+                subprocess.run(ip_change_command.split(), timeout=30)
+                import time
+                time.sleep(5)
+                return True
+
+        except Exception as e:
+            logger.error(f"❌ Не удалось сменить IP: {e}")
+
+        return False
+
+    def get_current_ip(self):
+        """Получение текущего IP адреса"""
+        try:
+            import requests
+            response = requests.get('https://httpbin.org/ip', timeout=10)
+            if response.status_code == 200:
+                ip_data = response.json()
+                return ip_data.get('origin', 'Unknown')
+        except Exception as e:
+            logger.debug(f"Не удалось получить IP: {e}")
+
+        return "Unknown"
+
+    def test_proxy(self, proxy_config):
+        """Тестирование работоспособности прокси"""
+        if not proxy_config:
+            return True
+
+        try:
+            import requests
+            proxies = {
+                'http': proxy_config['server'],
+                'https': proxy_config['server']
+            }
+
+            # Тестируем прокси на простом сайте
+            response = requests.get('http://httpbin.org/ip',
+                                  proxies=proxies,
+                                  timeout=10)
+
+            if response.status_code == 200:
+                ip_data = response.json()
+                logger.info(f"✅ Прокси работает, IP: {ip_data.get('origin', 'Unknown')}")
+                return True
             else:
-                # Если пользователь ищет аксессуары, даем бонус за соответствующие термины
-                accessory_bonus_terms = {
-                    'etui': 30, 'case': 30, 'cover': 25, 'obudowa': 25,
-                    'pokrowiec': 25, 'protector': 20, 'szkło': 20,
-                    'kabel': 30, 'cable': 30, 'charger': 30, 'ładowarka': 30,
-                    'stand': 25, 'podstawka': 25, 'bag': 25, 'torba': 25
-                }
+                logger.warning(f"⚠️ Прокси вернул статус: {response.status_code}")
+                return False
 
-                for term, bonus in accessory_bonus_terms.items():
-                    if term in title_lower:
-                        score += bonus  # Бонус за аксессуары, если их ищем
+        except Exception as e:
+            logger.warning(f"❌ Прокси не работает: {e}")
+            return False
 
-            # Дополнительная проверка: если в названии есть предлоги, указывающие на аксессуар
-            if any(word in title_lower for word in ['do', 'na', 'dla', 'for', 'für', 'to']):
-                # Проверяем, не аксессуар ли это к другому устройству
-                other_devices = ['telefon', 'phone', 'laptop', 'komputer', 'computer', 'tablet', 'ipad']
-                if any(device in title_lower for device in other_devices):
-                    # Но только если это не тот же тип устройства, что мы ищем
-                    query_devices = set(query_lower.split()) & set(other_devices)
-                    title_devices = set(title_lower.split()) & set(other_devices)
-                    if not query_devices.intersection(title_devices):
-                        score -= 80  # Штраф за аксессуары к другим устройствам
+    def get_working_proxy(self, max_attempts=5):
+        """Получение рабочего прокси с несколькими попытками"""
+        for attempt in range(max_attempts):
+            proxy_config = self.get_proxy_config()
 
-        else:
-            # Если основных ключевых слов мало, применяем жесткие штрафы
-            score -= 20  # Базовый штраф за низкое совпадение
+            if not proxy_config:
+                return None
 
-        return max(0, score)
+            if self.test_proxy(proxy_config):
+                return proxy_config
+
+            logger.info(f"🔄 Попытка {attempt + 1}/{max_attempts}: пробуем другой прокси...")
+
+        logger.warning("❌ Не удалось найти рабочий прокси, используем прямое подключение")
+        return None
+
+    async def detect_captcha(self, page):
+        """Обнаружение капчи на странице"""
+        try:
+            # Ищем различные элементы капчи
+            captcha_selectors = [
+                'iframe[src*="captcha"]',
+                'div[class*="captcha"]',
+                'img[src*="captcha"]',
+                '[data-testid*="captcha"]',
+                'form[action*="captcha"]',
+                '.g-recaptcha',
+                '#captcha',
+                'text="Przepisz kod z obrazka"',
+                'text="Aplikacja przekroczyła limit"'
+            ]
+
+            for selector in captcha_selectors:
+                element = page.locator(selector).first
+                if await element.count() > 0:
+                    logger.warning(f"🤖 Обнаружена капча: {selector}")
+                    return True
+
+            # Проверяем текст страницы на наличие ключевых слов
+            page_content = await page.content()
+            captcha_keywords = [
+                'captcha',
+                'Przepisz kod z obrazka',
+                'Aplikacja przekroczyła limit zapytań',
+                'przekroczyła limit',
+                'Kod błędu',
+                'POTWIERDŹ',
+                'ffb8115a-3756-4f23-a833-80d38e2',  # Конкретный код ошибки
+                'Captcha',
+                'limit zapytań'
+            ]
+
+            for keyword in captcha_keywords:
+                if keyword.lower() in page_content.lower():
+                    logger.warning(f"🤖 Обнаружена капча по ключевому слову: {keyword}")
+                    return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Ошибка обнаружения капчи: {e}")
+            return False
+
+    async def solve_captcha_2captcha(self, page):
+        """Решение капчи через 2captcha сервис"""
+        try:
+            import os
+            api_key = os.getenv('CAPTCHA_API_KEY')
+
+            if not api_key:
+                logger.error("❌ API ключ 2captcha не найден в переменных окружения")
+                logger.info("💡 Добавьте CAPTCHA_API_KEY в файл .env")
+                return False
+
+            logger.info(f"🔑 Используем 2captcha API ключ: {api_key[:10]}...")
+
+            # Делаем скриншот страницы с капчей
+            screenshot_path = 'captcha_screenshot.png'
+            await page.screenshot(path=screenshot_path, full_page=True)
+
+            # Отправляем в 2captcha
+            from twocaptcha import TwoCaptcha
+            solver = TwoCaptcha(api_key)
+
+            logger.info("🤖 Отправляем капчу в 2captcha...")
+
+            try:
+                result = solver.normal(screenshot_path)
+                captcha_text = result['code']
+                logger.info(f"✅ Капча решена: {captcha_text}")
+
+                # Ищем поле ввода капчи и вводим результат
+                input_selectors = [
+                    'input[name*="captcha"]',
+                    'input[id*="captcha"]',
+                    'input[type="text"]',
+                    'input[placeholder*="kod"]'
+                ]
+
+                for selector in input_selectors:
+                    input_element = page.locator(selector).first
+                    if await input_element.count() > 0:
+                        await input_element.fill(captcha_text)
+                        logger.info(f"✅ Введен код капчи в поле: {selector}")
+                        break
+
+                # Ищем кнопку подтверждения
+                submit_selectors = [
+                    'button:has-text("POTWIERDŹ")',
+                    'button[type="submit"]',
+                    'input[type="submit"]',
+                    'button:has-text("Confirm")',
+                    'button:has-text("Submit")'
+                ]
+
+                for selector in submit_selectors:
+                    submit_button = page.locator(selector).first
+                    if await submit_button.count() > 0:
+                        await submit_button.click()
+                        logger.info(f"✅ Нажата кнопка подтверждения: {selector}")
+                        break
+
+                # Ждем загрузки после решения капчи
+                await page.wait_for_load_state("networkidle", timeout=10000)
+
+                # Проверяем, исчезла ли капча
+                if not await self.detect_captcha(page):
+                    logger.info("✅ Капча успешно решена!")
+                    return True
+                else:
+                    logger.warning("⚠️ Капча все еще присутствует")
+                    return False
+
+            except Exception as e:
+                logger.error(f"❌ Ошибка решения капчи через 2captcha: {e}")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка в solve_captcha_2captcha: {e}")
+            return False
 
     def search_products_simple(self, query: str) -> List[Dict[str, Any]]:
         """
-        Простой поиск через HTTP запросы
+        Улучшенный простой поиск через HTTP запросы
         """
         products = []
 
         try:
-            # Формируем URL для поиска
-            search_url = f"https://allegro.pl/listing?string={query.replace(' ', '+')}"
-            logger.info(f"🔍 HTTP поиск: {search_url}")
+            import time
+            import random
+            import urllib.parse
 
-            # Делаем запрос
+            # Переводим запрос
+            translated_query = self.translate_query(query)
+            encoded_query = urllib.parse.quote_plus(translated_query)
+            search_url = f"https://allegro.pl/listing?string={encoded_query}"
+
+            logger.info(f"🔍 HTTP поиск: {query} → {translated_query}")
+
+            # Улучшенные заголовки с ротацией
+            user_agents = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            ]
+
+            headers = {
+                'User-Agent': random.choice(user_agents),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'pl-PL,pl;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none'
+            }
+
+            # Случайная задержка
+            time.sleep(random.uniform(0.5, 2.0))
+
             session = requests.Session()
-            session.headers.update(self.headers)
+            session.headers.update(headers)
 
-            response = session.get(search_url, timeout=30)
+            response = session.get(search_url, timeout=15)
+
+            if response.status_code == 403:
+                logger.warning("403 ошибка, пробуем альтернативный URL")
+                # Пробуем другой формат URL
+                alt_url = f"https://allegro.pl/kategoria/elektronika?string={encoded_query}"
+                response = session.get(alt_url, timeout=15)
+
             response.raise_for_status()
 
             # Парсим HTML
@@ -365,17 +614,10 @@ class AllegroScraper:
         try:
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
-                    headless=True,  # Включаем headless обратно
+                    headless=True,  # Возвращаем headless режим
                     args=[
-                        '--disable-blink-features=AutomationControlled',
-                        '--disable-web-security',
-                        '--disable-features=VizDisplayCompositor',
                         '--no-sandbox',
-                        '--disable-dev-shm-usage',
-                        '--disable-extensions',
-                        '--disable-plugins',
-                        '--disable-images',
-                        '--disable-javascript'
+                        '--disable-dev-shm-usage'
                     ]
                 )
                 context = await browser.new_context(
@@ -431,6 +673,31 @@ class AllegroScraper:
 
                 await page.wait_for_load_state("networkidle", timeout=30000)
                 await asyncio.sleep(5)  # Увеличиваем ожидание
+
+                # ПАУЗА ДЛЯ ПРОСМОТРА СТРАНИЦЫ
+                logger.info("🔍 БРАУЗЕР ОТКРЫТ! Посмотрите что происходит на странице...")
+
+                # Проверяем наличие капчи
+                captcha_detected = await self.detect_captcha(page)
+                if captcha_detected:
+                    logger.warning("🤖 Обнаружена капча! Пытаемся решить...")
+                    captcha_solved = await self.solve_captcha_2captcha(page)
+                    if captcha_solved:
+                        logger.info("✅ Капча решена, продолжаем поиск...")
+                        await asyncio.sleep(3)
+                    else:
+                        logger.error("❌ Не удалось решить капчу автоматически")
+                        logger.info("⏳ Ожидание ручного решения капчи (30 секунд)...")
+                        await asyncio.sleep(30)
+
+                        # Проверяем еще раз после ожидания
+                        if await self.detect_captcha(page):
+                            logger.error("❌ Капча все еще присутствует, прерываем поиск")
+                            return []
+                        else:
+                            logger.info("✅ Капча решена вручную, продолжаем")
+
+                await asyncio.sleep(15)  # 15 секунд для просмотра
 
                 # Добавляем более детальную диагностику
                 try:
@@ -521,15 +788,38 @@ class AllegroScraper:
                                     # Извлекаем цену
                                     price = ""
                                     price_selectors = [
+                                        # Основные селекторы с валютой
                                         'span:has-text("zł")',
+                                        'div:has-text("zł")',
+                                        '*:has-text("zł")',
+
+                                        # Data-testid селекторы
                                         '[data-testid*="price"]',
-                                        'span[class*="price"]',
-                                        'div[class*="price"]',
-                                        'span:has-text("PLN")',
-                                        'span:has-text(",")',
+                                        '[data-testid*="Price"]',
                                         '[data-testid="price-container"]',
                                         '[data-testid="price"]',
-                                        'span[data-role="price"]'
+                                        '[data-testid="price-label"]',
+                                        '[data-testid="price-value"]',
+
+                                        # Классы цен
+                                        'span[class*="price"]',
+                                        'div[class*="price"]',
+                                        '[class*="_price"]',
+                                        '[class*="amount"]',
+                                        '[class*="cost"]',
+                                        '.price',
+
+                                        # Data-role селекторы
+                                        'span[data-role="price"]',
+                                        '[data-role="price"]',
+
+                                        # Дополнительные
+                                        'span:has-text("PLN")',
+                                        'span:has-text(",")',
+                                        '[aria-label*="price"]',
+                                        '[aria-label*="cena"]',
+                                        '.offer-price',
+                                        '.product-price'
                                     ]
 
                                     for price_selector in price_selectors:
@@ -547,9 +837,40 @@ class AllegroScraper:
                                         if price_match:
                                             price = price_match.group()
 
-                                    # Извлекаем изображение
-                                    image_element = element.locator('img').first
-                                    image = await image_element.get_attribute('src') if await image_element.count() > 0 else ""
+                                    # Извлекаем изображение - улучшенный метод
+                                    image = ""
+                                    image_selectors = [
+                                        'img[src*="allegro"]',
+                                        'img[data-src*="allegro"]',
+                                        'img[src]',
+                                        'img[data-src]',
+                                        'img[data-lazy-src]'
+                                    ]
+
+                                    for img_selector in image_selectors:
+                                        img_element = element.locator(img_selector).first
+                                        if await img_element.count() > 0:
+                                            src = await img_element.get_attribute('src') or await img_element.get_attribute('data-src') or await img_element.get_attribute('data-lazy-src')
+                                            if src:
+                                                # Формируем полную ссылку
+                                                if src.startswith('//'):
+                                                    image = f"https:{src}"
+                                                elif src.startswith('/'):
+                                                    image = f"https://allegro.pl{src}"
+                                                else:
+                                                    image = src
+
+                                                # Проверяем что это не иконка
+                                                if not any(x in image.lower() for x in ['icon', 'logo', 'sprite']) or 'product' in image.lower():
+                                                    break
+
+                                    if not image:
+                                        # Fallback - любое изображение
+                                        img_element = element.locator('img').first
+                                        if await img_element.count() > 0:
+                                            src = await img_element.get_attribute('src')
+                                            if src:
+                                                image = src if src.startswith('http') else f"https://allegro.pl{src}"
 
                                     if title and price:
                                         title = title.strip()
@@ -660,6 +981,213 @@ class AllegroScraper:
         logger.info(f"🏁 Найдено {len(products)} релевантных товаров")
         return products
 
+    def search_mobile_version(self, query: str) -> List[Dict[str, Any]]:
+        """Поиск через мобильную версию Allegro"""
+        try:
+            import urllib.parse
+            encoded_query = urllib.parse.quote_plus(query)
+            mobile_url = f"https://m.allegro.pl/listing?string={encoded_query}"
+
+            mobile_headers = {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'pl-PL,pl;q=0.9'
+            }
+
+            response = requests.get(mobile_url, headers=mobile_headers, timeout=10)
+
+            if response.status_code == 200:
+                return self.parse_simple_html(response.text, query)
+
+        except Exception as e:
+            logger.error(f"Ошибка мобильной версии: {e}")
+
+        return []
+
+    def search_by_categories(self, query: str) -> List[Dict[str, Any]]:
+        """Поиск через основные категории"""
+        categories = {
+            'elektronika': ['телефон', 'смартфон', 'айфон', 'ноутбук', 'компьютер', 'планшет'],
+            'dom-i-ogrod': ['кофемашина', 'пылесос', 'холодильник', 'мебель'],
+            'moda': ['кроссовки', 'куртка', 'джинсы', 'футболка'],
+            'sport-i-turystyka': ['велосипед', 'лыжи', 'фитнес']
+        }
+
+        query_lower = query.lower()
+        selected_category = 'elektronika'  # По умолчанию
+
+        # Определяем категорию по ключевым словам
+        for category, keywords in categories.items():
+            if any(keyword in query_lower for keyword in keywords):
+                selected_category = category
+                break
+
+        try:
+            import urllib.parse
+            encoded_query = urllib.parse.quote_plus(query)
+            category_url = f"https://allegro.pl/kategoria/{selected_category}?string={encoded_query}"
+
+            response = requests.get(category_url, headers=self.headers, timeout=10)
+
+            if response.status_code == 200:
+                return self.parse_simple_html(response.text, query)
+
+        except Exception as e:
+            logger.error(f"Ошибка поиска по категориям: {e}")
+
+        return []
+
+    def parse_simple_html(self, html: str, query: str) -> List[Dict[str, Any]]:
+        """Простой парсинг HTML с базовым извлечением цен и изображений"""
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html, 'html.parser')
+            products = []
+
+            # Ищем ссылки на товары (простой метод, который работал)
+            links = soup.find_all('a', href=True)
+
+            for link in links:
+                href = link.get('href', '')
+                if '/oferta/' in href:
+                    title = link.get_text(strip=True)
+                    if title and len(title) > 10:
+                        score = self.calculate_relevance_score(title, query)
+                        if score >= 30:
+                            # Ищем цену рядом с товаром - улучшенный поиск
+                            price = "Цена не указана"
+                            parent = link.find_parent()
+
+                            # Расширяем поиск на несколько уровней вверх
+                            search_containers = [parent]
+                            if parent:
+                                # Добавляем родительские элементы
+                                grandparent = parent.find_parent()
+                                if grandparent:
+                                    search_containers.append(grandparent)
+                                    great_grandparent = grandparent.find_parent()
+                                    if great_grandparent:
+                                        search_containers.append(great_grandparent)
+
+                            for container in search_containers:
+                                if not container:
+                                    continue
+
+                                # Сначала ищем по селекторам
+                                price_selectors = [
+                                    '[data-testid*="price"]',
+                                    '[class*="price"]',
+                                    '[class*="amount"]',
+                                    '[class*="cost"]',
+                                    '.price'
+                                ]
+
+                                for selector in price_selectors:
+                                    price_elem = container.select_one(selector)
+                                    if price_elem:
+                                        price_text = price_elem.get_text(strip=True)
+                                        if price_text and 'zł' in price_text:
+                                            price = price_text
+                                            break
+
+                                if price != "Цена не указана":
+                                    break
+
+                                # Если не нашли по селекторам, ищем регулярными выражениями
+                                price_text = container.get_text()
+                                import re
+
+                                # Улучшенные паттерны для поиска цен
+                                price_patterns = [
+                                    r'\d+[,\s]*\d*\s*zł',  # 123 zł или 123,45 zł
+                                    r'\d+[,\.]\d{2}\s*zł',  # 123.45 zł или 123,45 zł
+                                    r'\d+\s*zł',           # 123zł
+                                    r'\d+[,\s]*\d*\s*PLN', # 123 PLN
+                                ]
+
+                                for pattern in price_patterns:
+                                    price_match = re.search(pattern, price_text)
+                                    if price_match:
+                                        price = price_match.group().strip()
+                                        break
+
+                                if price != "Цена не указана":
+                                    break
+
+                            # Ищем изображение - улучшенный поиск
+                            image = ""
+
+                            # Ищем в тех же контейнерах что и цену
+                            for container in search_containers:
+                                if not container:
+                                    continue
+
+                                # Расширенные селекторы для изображений
+                                img_selectors = [
+                                    'img[src*="allegro"]',
+                                    'img[data-src*="allegro"]',
+                                    'img[data-lazy-src*="allegro"]',
+                                    'img[src*="product"]',
+                                    'img[data-src*="product"]',
+                                    'img[src]',
+                                    'img[data-src]',
+                                    'img[data-lazy-src]'
+                                ]
+
+                                for selector in img_selectors:
+                                    img_elem = container.select_one(selector)
+                                    if img_elem:
+                                        src = (img_elem.get('src') or
+                                              img_elem.get('data-src') or
+                                              img_elem.get('data-lazy-src') or
+                                              img_elem.get('data-original'))
+
+                                        if src:
+                                            # Формируем полную ссылку
+                                            if src.startswith('//'):
+                                                image = f"https:{src}"
+                                            elif src.startswith('/'):
+                                                image = f"https://allegro.pl{src}"
+                                            else:
+                                                image = src
+
+                                            # Проверяем что это не иконка или логотип
+                                            if not any(x in image.lower() for x in ['icon', 'logo', 'sprite', 'placeholder']) or 'product' in image.lower():
+                                                break
+
+                                if image:
+                                    break
+
+                            # Формируем полную ссылку
+                            if not href.startswith('http'):
+                                href = f"https://allegro.pl{href}"
+
+                            product = {
+                                'name': title,
+                                'price': price,
+                                'url': href,
+                                'image': image,
+                                'description': title,
+                                'relevance_score': score
+                            }
+                            products.append(product)
+
+                            if len(products) >= 10:
+                                break
+
+            # Сортируем по релевантности
+            if products:
+                products.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
+                logger.info(f"✅ Результаты отсортированы по релевантности")
+
+            logger.info(f"✅ Найдено {len(products)} товаров через простой парсинг")
+            return products
+
+        except Exception as e:
+            logger.error(f"Ошибка парсинга HTML: {e}")
+            return []
+
+
 # Синхронная обертка
 def search_allegro_improved(query: str, max_pages: int = 1, debug_mode: bool = False) -> List[Dict[str, Any]]:
     """
@@ -669,53 +1197,59 @@ def search_allegro_improved(query: str, max_pages: int = 1, debug_mode: bool = F
         # Создаем экземпляр скрапера
         scraper = AllegroScraper()
 
-        # Сначала пробуем простой HTTP поиск
+        # Проверяем текущий IP
+        current_ip = scraper.get_current_ip()
+        logger.info(f"🌐 Текущий IP: {current_ip}")
+
+        # Сначала пробуем простой HTTP поиск с разными User-Agent
         logger.info(f"🔍 Попытка HTTP поиска на Allegro: {query}")
-        http_results = scraper.search_products_simple(query)
-
-        if http_results:
-            logger.info(f"✅ HTTP поиск успешен: найдено {len(http_results)} товаров")
-            return http_results
-
-        logger.info("⚠️ HTTP поиск не дал результатов, пробуем Playwright...")
-
-        # Если HTTP не сработал, пробуем Playwright (но с ограниченным временем)
-        playwright_results = []
-        try:
-            playwright_results = asyncio.run(scraper.search_products(query))
-            if playwright_results:
-                logger.info(f"✅ Playwright поиск успешен: найдено {len(playwright_results)} товаров")
-                return playwright_results
-        except Exception as e:
-            logger.error(f"❌ Ошибка Playwright поиска: {e}")
-
-        # Если доступен AllegroParser с 2Captcha, пробуем его только если Playwright не дал результатов
-        if AllegroParser and not playwright_results:
-            logger.info("🚀 Пробуем AllegroParser с поддержкой 2captcha...")
+        
+        # Пробуем разные User-Agent для обхода блокировок
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+        ]
+        
+        for i, user_agent in enumerate(user_agents):
             try:
-                # Получаем API ключ для 2captcha
-                import os
-                captcha_api_key = os.getenv('CAPTCHA_API_KEY', '')
-
-                # Создаем парсер
-                parser = AllegroParser(captcha_api_key=captcha_api_key)
-
-                # Выполняем поиск
-                advanced_results = parser.search_allegro(query, limit=20, max_pages=max_pages)
-
-                if advanced_results:
-                    logger.info(f"✅ AllegroParser успешен: найдено {len(advanced_results)} товаров")
-                    return advanced_results
-
+                logger.info(f"🔍 Попытка {i+1}/4 с User-Agent: {user_agent[:50]}...")
+                scraper.headers['User-Agent'] = user_agent
+                http_results = scraper.search_products_simple(query)
+                
+                if http_results and len(http_results) > 0:
+                    logger.info(f"✅ HTTP поиск успешен с User-Agent {i+1}: найдено {len(http_results)} товаров")
+                    return http_results
+                    
             except Exception as e:
-                logger.error(f"❌ Ошибка AllegroParser: {e}")
+                logger.error(f"❌ Ошибка HTTP поиска с User-Agent {i+1}: {e}")
+                continue
 
-        # Если Playwright дал результаты, но мы их не вернули выше, возвращаем их сейчас
-        if playwright_results:
-            return playwright_results
+        logger.info("⚠️ HTTP поиск не дал результатов, пробуем альтернативные методы...")
 
-        # Если ничего не сработало, возвращаем пустой список
-        logger.warning("❌ Все методы поиска Allegro не сработали, товары не найдены")
+        # Метод 2: Поиск через категории без CAPTCHA
+        try:
+            logger.info("🔍 Пробуем поиск по категориям...")
+            category_results = scraper.search_by_categories(query)
+            if category_results and len(category_results) > 0:
+                logger.info(f"✅ Поиск по категориям: найдено {len(category_results)} товаров")
+                return category_results
+        except Exception as e:
+            logger.error(f"❌ Ошибка поиска по категориям: {e}")
+
+        # Метод 3: Мобильная версия
+        try:
+            logger.info("🔍 Пробуем мобильную версию...")
+            mobile_results = scraper.search_mobile_version(query)
+            if mobile_results and len(mobile_results) > 0:
+                logger.info(f"✅ Мобильная версия: найдено {len(mobile_results)} товаров")
+                return mobile_results
+        except Exception as e:
+            logger.error(f"❌ Ошибка мобильной версии: {e}")
+
+        # Если ничего не сработало, возвращаем пустой список вместо fallback
+        logger.warning("❌ Все методы поиска Allegro не сработали, возвращаем пустой список")
         return []
 
     except Exception as e:
