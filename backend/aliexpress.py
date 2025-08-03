@@ -9,11 +9,11 @@ from urllib.parse import quote_plus, urlencode
 from bs4 import BeautifulSoup
 import os
 
-# Настройка логирования
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# AliExpress scraping constants
+
 ALIEXPRESS_BASE = "https://www.aliexpress.com/wholesale"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " \
              "AppleWebKit/537.36 (KHTML, like Gecko) " \
@@ -49,7 +49,7 @@ def scrape_aliexpress(query: str, limit: int = 20) -> List[Dict[str, Any]]:
 
     soup = BeautifulSoup(resp.text, 'html.parser')
 
-    # Пробуем разные селекторы для карточек товаров
+
     card_selectors = [
         'div._3t7zg',  # старый селектор
         'div[data-widget-cid]',  # новый селектор
@@ -184,7 +184,7 @@ def search_aliexpress_api(query: str, limit: int = 20) -> List[Dict[str, Any]]:
     logger.info(f"🔑 Используем RapidAPI ключ: {api_key[:10]}...")
 
     try:
-        # Используем http.client как в вашем примере с обходом SSL
+
         context = ssl.create_default_context()
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
@@ -196,7 +196,7 @@ def search_aliexpress_api(query: str, limit: int = 20) -> List[Dict[str, Any]]:
             'x-rapidapi-host': "aliexpress-datahub.p.rapidapi.com"
         }
 
-        # Формируем параметры запроса для рабочего эндпоинта
+
         params = {
             "q": query,
             "page": "1"

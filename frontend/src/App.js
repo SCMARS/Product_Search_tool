@@ -9,19 +9,19 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // CSV upload states
+
   const [csvUploading, setCsvUploading] = useState(false);
   const [csvUploadSuccess, setCsvUploadSuccess] = useState(false);
   const [csvUploadError, setCsvUploadError] = useState(null);
   const [csvProductsCount, setCsvProductsCount] = useState(0);
   const fileInputRef = useRef(null);
 
-  // CSV results states
+
   const [csvResults, setCsvResults] = useState(null);
   const [csvResultsLoading, setCsvResultsLoading] = useState(false);
   const [csvResultsError, setCsvResultsError] = useState(null);
 
-  // Force re-render function
+
   const [, updateState] = useState();
   const forceUpdate = useCallback(() => updateState({}), []);
 
@@ -32,7 +32,7 @@ function App() {
     setError(null);
 
     try {
-   //api/search
+
       const response = await axios.post('http://127.0.0.1:5001/api/search', {
         query: query.trim()
       }, {
@@ -57,18 +57,18 @@ function App() {
     }
   }, [query]);
 
-  // Автоматический поиск с задержкой (debounce)
+
   useEffect(() => {
     const delayedSearch = setTimeout(() => {
-      if (query.trim().length > 4) { // Поиск только если больше 2 символов
+      if (query.trim().length > 4) {
         performSearch();
       } else {
-        setResults(null); // Очистить результаты если запрос короткий
+        setResults(null);
       }
-    }, 500); // Задержка 500ms
+    }, 5000);
 
-    return () => clearTimeout(delayedSearch); // Очистка таймера
-  }, [query, performSearch]); // Добавляем performSearch в зависимости
+    return () => clearTimeout(delayedSearch);
+  }, [query, performSearch]);
 
   const fetchCsvResults = async () => {
     // Reset states
@@ -82,7 +82,7 @@ function App() {
       });
 
       if (response.data.success) {
-        // Проверяем новый формат данных с метаданными
+
         const results = response.data.results.results || response.data.results;
         setCsvResults(results);
         console.log('CSV results fetched successfully:', results);

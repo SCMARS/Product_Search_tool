@@ -1,17 +1,17 @@
-# Product Search Tool
+# Інструмент Пошуку Товарів
 
-A full-stack web application that allows users to search for products across multiple e-commerce platforms (Allegro, Amazon, and Aliexpress) simultaneously.
+Повнофункціональний веб-додаток, який дозволяє користувачам одночасно шукати товари на кількох платформах електронної комерції (Allegro, Amazon та Aliexpress).
 
-## Features
+## Особливості
 
-- Search for products by name across three platforms
-- View top 3 results from each platform
-- See product details including name, price, image, and link
-- Copy product description with a single click
-- Clean and responsive UI built with React and Tailwind CSS
-- Backend API powered by Flask
+- Пошук товарів за назвою на трьох платформах одночасно
+- Перегляд топ-3 результатів з кожної платформи
+- Деталі товару включають назву, ціну, зображення та посилання
+- Копіювання опису товару одним кліком
+- Чистий та адаптивний інтерфейс на React з Tailwind CSS
+- Backend API на Flask з веб-скрапінгом
 
-## Project Structure
+## Структура Проекту
 
 ```
 project/
@@ -29,144 +29,144 @@ project/
 └── README.md           # This file
 ```
 
-## Setup and Installation
+## Налаштування та встановлення
 
-### Option 1: Quick Setup with Chrome VPN Support
+### Варіант 1: Швидке налаштування з підтримкою Chrome VPN
 
-For users who need to use VPN (especially for Allegro.pl access):
+Для користувачів, яким потрібен VPN (особливо для доступу до Allegro.pl):
 
 ```bash
-# 1. Настройка Chrome с VPN
+# 1. Налаштування Chrome з VPN
 ./setup_chrome_vpn.sh
 
-# 2. Запуск приложения
+# 2. Запуск додатку
 ./run.sh
 ```
 
-### Option 2: Using the Automated Script (Standard)
+### Варіант 2: Використання автоматичного скрипту (стандартний)
 
-The easiest way to run the application is to use the provided shell script:
+Найлегчший спосіб запуску додатку — використання наданого shell-скрипту:
 
 ```
 ./run.sh
 ```
 
-This script will automatically:
-- Set up the Python virtual environment
-- Install backend dependencies
-- Install Playwright browsers
-- Start the Flask server
-- Install frontend dependencies
-- Start the React development server
+Цей скрипт автоматично:
+- Налаштує Python віртуальне середовище
+- Встановлює залежності бекенду
+- Встановлює браузери Playwright
+- Запускає сервер Flask
+- Встановлює залежності фронтенду
+- Запускає розробческий сервер React
 
-### Option 2: Manual Setup
+### Варіант 2: Ручне налаштування
 
-#### Backend Setup
+#### Налаштування бекенду
 
-1. Navigate to the backend directory:
+1. Перейдіть до директорії бекенду:
    ```
    cd backend
    ```
 
-2. Create a virtual environment (optional but recommended):
+2. Створіть віртуальне середовище (необов'язково, але рекомендується):
    ```
    python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   source venv/bin/activate  # На Windows: venv\Scripts\activate
    ```
 
-3. Install dependencies:
+3. Встановіть залежності:
    ```
    pip install -r requirements.txt
    ```
 
-4. Install Playwright browsers:
+4. Встановіть браузери Playwright:
    ```
    playwright install
    ```
 
-5. Create a `.env` file based on `.env.example` and add your Allegro API credentials:
+5. Створіть файл `.env` на основі `.env.example` та додайте ваші облікові дані API Allegro:
    ```
    ALLEGRO_CLIENT_ID=your_client_id_here
    ALLEGRO_CLIENT_SECRET=your_client_secret_here
    ```
 
-6. Start the Flask server:
+6. Запустіть сервер Flask:
    ```
    flask run
    ```
-   The API will be available at http://localhost:5001
+   API буде доступний за адресою http://localhost:5001
 
-### Frontend Setup
+#### Налаштування фронтенду
 
-1. Navigate to the frontend directory:
+1. Перейдіть до директорії фронтенду:
    ```
    cd frontend
    ```
 
-2. Install dependencies:
+2. Встановіть залежності:
    ```
    npm install
    ```
 
-3. Start the development server:
+3. Запустіть розробческий сервер:
    ```
    npm start
    ```
-   The application will be available at http://localhost:3000
+   Додаток буде доступний за адресою http://localhost:3000
 
-## VPN Setup for Allegro.pl Access
+## Налаштування VPN для доступу до Allegro.pl
 
-Since Allegro.pl may block access from certain regions, you can use your Chrome browser with VPN.
+Оскільки Allegro.pl може блокувати доступ з певних регіонів, ви можете використовувати свій браузер Chrome з VPN.
 
-**📖 Подробные инструкции: [CHROME_VPN_SETUP.md](CHROME_VPN_SETUP.md)**
+**📖 Детальні інструкції: [CHROME_VPN_SETUP.md](CHROME_VPN_SETUP.md)**
 
-### Quick Setup:
+### Швидке налаштування:
 ```bash
-# Автоматическая настройка и запуск
+# Автоматичне налаштування та запуск
 ./setup_chrome_vpn.sh
 ./run.sh
 ```
 
-### Alternative: Connect to Running Chrome
+### Альтернатива: Підключення до запущеного Chrome
 ```bash
-# Запуск Chrome с VPN
+# Запуск Chrome з VPN
 ./start_chrome_with_vpn.sh
 
-# В .env установите: CONNECT_TO_EXISTING_CHROME=true
-# Затем запустите: ./run.sh
+# У .env встановіть: CONNECT_TO_EXISTING_CHROME=true
+# Потім запустіть: ./run.sh
 ```
 
-## Usage
+## Використання
 
-1. Enter a product name in the search field (e.g., "iPhone 13")
-2. Click the "Search" button
-3. Wait for the results to load from all three platforms
-4. Browse the results and click "View Product" to visit the product page on the original marketplace
-5. Click "Copy Description" to copy the product details to your clipboard for easy sharing
+1. Введіть назву товару у полі пошуку (наприклад, "iPhone 13")
+2. Натисніть кнопку "Пошук"
+3. Зачекайте завантаження результатів з усіх трьох платформ
+4. Перегляньте результати та натисніть "Переглянути товар", щоб перейти на сторінку товару на оригінальній маркетплейсі
+5. Натисніть "Копіювати опис", щоб скопіювати деталі товару у буфер обміну для легкого поширення
 
-## Technical Details
+## Технічні деталі
 
-### Frontend
+### Фронтенд
 - React 18
-- Tailwind CSS for styling
-- Axios for API requests
+- Tailwind CSS для стилізації
+- Axios для запитів до API
 
-### Backend
-- Flask with Flask-CORS
-- Allegro API integration using requests
-- Web scraping for Amazon and Aliexpress using Playwright
-- Concurrent searches using ThreadPoolExecutor
+### Бекенд
+- Flask з Flask-CORS
+- Інтеграція API Allegro за допомогою requests
+- Веб-скрапінг для Amazon та Aliexpress за допомогою Playwright
+- Паралельні пошуки за допомогою ThreadPoolExecutor
 
-## Notes
+## Примітки
 
-- Web scraping is dependent on the structure of the target websites and may break if they change their layout
-- The Allegro API requires registration and credentials
-- For production use, consider implementing caching and rate limiting
+- Веб-скрапінг залежить від структури цільових веб-сторінок і може зламатися, якщо вони змінять свій розмітку
+- API Allegro потребує реєстрації та облікових даних
+- Для виробничого використання розгляньте реалізацію кешування та обмеження частоти запитів
 
-## Future Improvements
+## Майбутні покращення
 
-- Add pagination for more results
-- Implement sorting and filtering options
-- Add price comparison features
-- Support for more e-commerce platforms
-- CSV upload for bulk queries
+- Додавання пагінації для отримання більше результатів
+- Реалізація опцій сортування та фільтрації
+- Додавання функцій порівняння цін
+- Підтримка додаткових платформ електронної комерції
+- Завантаження CSV для масових запитів
