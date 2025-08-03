@@ -1,203 +1,301 @@
-#!/usr/bin/env python3
-"""
-Простой и надежный скрапер для AliExpress
-"""
 
 import requests
 import json
 import logging
+import http.client
+import ssl
 from typing import List, Dict, Any
+from urllib.parse import quote_plus, urlencode
+from bs4 import BeautifulSoup
 import os
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# AliExpress scraping constants
+ALIEXPRESS_BASE = "https://www.aliexpress.com/wholesale"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " \
+             "AppleWebKit/537.36 (KHTML, like Gecko) " \
+             "Chrome/115.0 Safari/537.36"
+HEADERS = {"User-Agent": USER_AGENT}
+
+
 def search_aliexpress(query: str, limit: int = 20) -> List[Dict[str, Any]]:
-    """Улучшенный поиск товаров на AliExpress с расширенными запросами"""
-    results = []
-    
-    logger.info(f"🔍 Начинаем поиск на AliExpress: {query}")
-    
-    # Создаем варианты поисковых запросов для лучшего покрытия
-    search_variants = [
-        query,  # Оригинальный запрос
-        query.replace('массажор', 'массажер'),  # Исправляем опечатки
-        query.replace('массажер', 'massager'),  # Английский вариант
-        query.replace('фотоаппарат', 'camera'),
-        query.replace('телефон', 'phone'),
-        query.replace('наушники', 'headphones'),
-        query.replace('часы', 'watch'),
-    ]
-    
-    # Расширенные синонимы и похожие термины для ВСЕХ товаров
-    synonyms = {
-        # Массажеры
-        'массажер': ['massager', 'massage gun', 'massage device'],
-        'массажор': ['massager', 'massage gun', 'massage device'],
-
-        # Бренды телефонов
-        'айфон': ['iphone', 'apple phone', 'smartphone'],
-        'iphone': ['phone case', 'mobile phone', 'smartphone'],
-        'самсунг': ['samsung', 'galaxy', 'samsung phone'],
-        'samsung': ['galaxy', 'samsung phone', 'android phone'],
-        'сяоми': ['xiaomi', 'redmi', 'mi phone'],
-        'xiaomi': ['redmi', 'mi phone', 'android phone'],
-        'хуавей': ['huawei', 'honor', 'huawei phone'],
-        'huawei': ['honor', 'huawei phone', 'android phone'],
-
-        # Ноутбуки
-        'макбук': ['macbook', 'apple laptop', 'laptop'],
-        'macbook': ['laptop case', 'laptop stand', 'laptop accessories'],
-        'дел': ['dell', 'dell laptop', 'laptop'],
-        'dell': ['dell laptop', 'laptop', 'computer'],
-        'хп': ['hp', 'hp laptop', 'laptop'],
-        'hp': ['hp laptop', 'laptop', 'computer'],
-        'фотоаппарат': ['camera', 'digital camera', 'photo camera'],
-        'camera': ['digital camera', 'photo camera', 'video camera'],
-        'наушники': ['headphones', 'earphones', 'wireless headphones'],
-        'headphones': ['earphones', 'wireless headphones', 'bluetooth headphones'],
-        'часы': ['watch', 'smart watch', 'wrist watch'],
-        'watch': ['smart watch', 'wrist watch', 'digital watch'],
-        'laptop': ['notebook', 'computer', 'laptop accessories'],
-        'телефон': ['phone', 'smartphone', 'mobile phone'],
-        'phone': ['smartphone', 'mobile phone', 'phone case'],
-        'планшет': ['tablet', 'ipad', 'tablet case'],
-        'tablet': ['ipad', 'tablet case', 'tablet stand'],
-        'клавиатура': ['keyboard', 'wireless keyboard', 'gaming keyboard'],
-        'keyboard': ['wireless keyboard', 'gaming keyboard', 'mechanical keyboard'],
-        'мышь': ['mouse', 'wireless mouse', 'gaming mouse'],
-        'mouse': ['wireless mouse', 'gaming mouse', 'computer mouse'],
-        
-        # Инструменты
-        'silicone caulking tools': ['silicone seam tool', 'caulking tool', 'silicone tool'],
-        'caulking tools': ['caulking tool', 'seam tool', 'silicone tool'],
-        'silicone tools': ['silicone tool', 'caulking tool', 'seam tool']
-    }
-    
-    # Добавляем синонимы к вариантам поиска
-    for word, syns in synonyms.items():
-        if word in query.lower():
-            search_variants.extend(syns[:1])  # Добавляем только первый синоним
-    
-    # Убираем дубликаты
-    search_variants = list(set(search_variants))
-    
-    # Пробуем RapidAPI метод сначала
     try:
         api_results = search_aliexpress_api(query, limit)
         if api_results:
             logger.info(f"✅ RapidAPI поиск успешен: найдено {len(api_results)} товаров")
             return api_results
     except Exception as e:
-        logger.error(f"❌ Ошибка RapidAPI поиска: {e}")
+        logger.warning(f"⚠️ RapidAPI поиск не удался: {e}")
 
-    # Если API не сработал, возвращаем пустой список
-    logger.info(f"❌ API не сработал, возвращаем пустой список")
-    return []
 
-def search_aliexpress_api(query, limit=20):
-    """Поиск товаров на AliExpress через RapidAPI DataHub"""
-    results = []
+    logger.info("🔄 Попытка HTML-скрапинга на AliExpress")
+    return scrape_aliexpress(query, limit)
 
-    try:
-        # RapidAPI endpoint для AliExpress DataHub
-        url = "https://aliexpress-datahub.p.rapidapi.com/item_search"
 
-        querystring = {
-            "q": query,
-            "page": "1",
-            "sort": "SALE_PRICE_ASC",
-            "locale": "en_US",
-            "region": "US",
-            "currency": "USD"
-        }
+def scrape_aliexpress(query: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """Скрапинг результатов поиска AliExpress с обновленными селекторами"""
+    results: List[Dict[str, Any]] = []
+    encoded = quote_plus(query)
+    url = f"{ALIEXPRESS_BASE}?SearchText={encoded}"
+    logger.info(f"🔍 Скрейпер: запрос {url}")
 
-        headers = {
-            "X-RapidAPI-Key": os.environ.get("RAPIDAPI_KEY", "067bf13bb7msh29bf8d815f8744bp158f84jsnd4928e52ec6e"),
-            "X-RapidAPI-Host": "aliexpress-datahub.p.rapidapi.com"
-        }
+    resp = requests.get(url, headers=HEADERS, timeout=15)
+    if resp.status_code != 200:
+        logger.error(f"❌ Скрапинг не удался, статус: {resp.status_code}")
+        return results
 
-        logger.info(f"🔍 AliExpress API поиск: {query}")
-        
-        response = requests.get(url, headers=headers, params=querystring, timeout=30)
+    soup = BeautifulSoup(resp.text, 'html.parser')
 
-        if response.status_code == 200:
-            data = response.json()
-            logger.info(f"✅ API ответ получен, статус: {response.status_code}")
-            
-            # Проверяем структуру ответа
-            products = []
-            if 'result' in data:
-                result = data['result']
-                if isinstance(result, dict) and 'resultList' in result:
-                    products = result['resultList']
-                elif isinstance(result, list):
-                    products = result
-            
-            logger.info(f"📦 Найдено товаров в API: {len(products)}")
+    # Пробуем разные селекторы для карточек товаров
+    card_selectors = [
+        'div._3t7zg',  # старый селектор
+        'div[data-widget-cid]',  # новый селектор
+        'div.list-item',
+        'div.product-item',
+        'div[class*="item"]',
+        'a[href*="/item/"]',  # ссылки на товары
+        'div[class*="product"]'
+    ]
 
-            for product in products[:limit]:
-                try:
-                    # Парсим данные товара из AliExpress DataHub API
-                    name = product.get("title", {}).get("displayTitle", "") or product.get("title", "")
-                    
-                    # Парсим цену
-                    price_info = product.get("prices", {})
-                    if price_info and "salePrice" in price_info:
-                        sale_price = price_info["salePrice"]
-                        if isinstance(sale_price, dict):
-                            price = f"${sale_price.get('minPrice', 'N/A')}"
-                        else:
-                            price = f"${sale_price}"
-                    else:
-                        price = "Price not available"
-                    
-                    # URL товара
-                    product_url = product.get("productDetailUrl", "")
-                    if product_url and not product_url.startswith("http"):
-                        product_url = f"https:{product_url}"
-                    
-                    # Изображение товара
-                    image_info = product.get("image", {})
-                    if isinstance(image_info, dict):
-                        image_url = image_info.get("imgUrl", "")
-                    else:
-                        image_url = str(image_info) if image_info else ""
-                    
-                    if image_url and not image_url.startswith("http"):
-                        image_url = f"https:{image_url}"
-                    
-                    # Проверяем, что у нас есть минимально необходимые данные
-                    if name and price != "Price not available":
-                        results.append({
-                            "name": name.strip(),
-                            "price": price,
-                            "image": image_url,
-                            "url": product_url,
-                            "description": f"Источник: AliExpress",
-                            "relevance_score": 80
-                        })
-                        logger.info(f"📦 Найден товар: {name[:50]}... - {price}")
+    items = []
+    for selector in card_selectors:
+        items = soup.select(selector)
+        if items:
+            logger.info(f"✅ Найдено {len(items)} товаров с селектором: {selector}")
+            break
 
-                except Exception as e:
-                    logger.debug(f"Ошибка обработки товара: {str(e)}")
-                    continue
-                    
-            logger.info(f"✅ API поиск завершен. Найдено товаров: {len(results)}")
-            
-        else:
-            logger.error(f"❌ API запрос не удался. Статус: {response.status_code}")
+    if not items:
+        logger.warning("⚠️ Товары не найдены ни с одним селектором")
+        return results
 
-    except Exception as e:
-        logger.error(f"❌ Исключение во время API поиска: {str(e)}")
+    for card in items[:limit]:
+        try:
+            # Пробуем разные способы извлечения данных
+            name = ""
+            url = ""
+            price = ""
+            image = ""
 
+            # Извлекаем название и ссылку
+            title_selectors = [
+                'a._3t7zg._2f4Ho span._2tW1I',  # старый
+                'a[href*="/item/"]',  # новый
+                'h3 a',
+                'a[title]',
+                '.item-title a',
+                'a span'
+            ]
+
+            for title_sel in title_selectors:
+                title_el = card.select_one(title_sel)
+                if title_el:
+                    name = title_el.get_text(strip=True) or title_el.get('title', '')
+                    # Получаем ссылку из того же элемента или родителя
+                    link_el = title_el if title_el.name == 'a' else title_el.find_parent('a')
+                    if link_el:
+                        url = link_el.get('href', '')
+                    break
+
+            # Если не нашли через title селекторы, ищем любую ссылку на товар
+            if not name or not url:
+                link_el = card.select_one('a[href*="/item/"]')
+                if link_el:
+                    url = link_el.get('href', '')
+                    name = link_el.get_text(strip=True) or link_el.get('title', '')
+
+            # Извлекаем цену
+            price_selectors = [
+                'div._1w9jL span._12A8D',  # старый
+                'span[class*="price"]',
+                'div[class*="price"]',
+                '.price',
+                'span:contains("$")',
+                'span:contains("€")',
+                'span:contains("₽")'
+            ]
+
+            for price_sel in price_selectors:
+                price_el = card.select_one(price_sel)
+                if price_el:
+                    price = price_el.get_text(strip=True)
+                    if price and any(symbol in price for symbol in ['$', '€', '₽', 'US']):
+                        break
+
+            # Если цену не нашли, ищем любой текст с валютными символами
+            if not price:
+                all_text = card.get_text()
+                import re
+                price_match = re.search(r'[\$€₽]\s*\d+[.,]?\d*|\d+[.,]?\d*\s*[\$€₽]|US\s*\$\s*\d+[.,]?\d*', all_text)
+                if price_match:
+                    price = price_match.group().strip()
+
+            # Извлекаем изображение
+            img_selectors = [
+                'img._2r_T-',  # старый
+                'img[src*="alicdn"]',
+                'img[data-src*="alicdn"]',
+                'img[src]',
+                'img[data-src]'
+            ]
+
+            for img_sel in img_selectors:
+                img_el = card.select_one(img_sel)
+                if img_el:
+                    image = img_el.get('src') or img_el.get('data-src', '')
+                    if image:
+                        break
+
+            # Проверяем что у нас есть минимальные данные
+            if name and len(name) > 5:
+                # Исправляем URL
+                if url and not url.startswith('http'):
+                    if url.startswith('//'):
+                        url = f"https:{url}"
+                    elif url.startswith('/'):
+                        url = f"https://www.aliexpress.com{url}"
+
+                results.append({
+                    'name': name,
+                    'price': price if price else "Цена не указана",
+                    'url': url,
+                    'image': image,
+                    'description': 'Источник: AliExpress (scraped)',
+                    'relevance_score': 70
+                })
+                logger.info(f"✅ Скрапинг товар: {name[:50]} - {price}")
+        except Exception as ex:
+            logger.debug(f"Ошибка обработки карточки: {ex}")
+            continue
+
+    logger.info(f"✅ Скрапинг завершен: найдено {len(results)} товаров")
     return results
 
-if __name__ == "__main__":
-    # Тест
-    query = "массажор"
-    results = search_aliexpress(query, 5)
-    print(f"Найдено {len(results)} товаров для '{query}':")
-    for i, product in enumerate(results, 1):
-        print(f"{i}. {product['name']} - {product['price']}")
+
+def search_aliexpress_api(query: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """Работа через RapidAPI AliExpress DataHub используя http.client"""
+    api_key = os.environ.get("RAPIDAPI_KEY", "")
+    if not api_key:
+        logger.warning("⚠️ RAPIDAPI_KEY не найден, пропускаем API поиск")
+        raise RuntimeError("RAPIDAPI_KEY not configured")
+
+    logger.info(f"🔑 Используем RapidAPI ключ: {api_key[:10]}...")
+
+    try:
+        # Используем http.client как в вашем примере с обходом SSL
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+
+        conn = http.client.HTTPSConnection("aliexpress-datahub.p.rapidapi.com", context=context)
+
+        headers = {
+            'x-rapidapi-key': api_key,
+            'x-rapidapi-host': "aliexpress-datahub.p.rapidapi.com"
+        }
+
+        # Формируем параметры запроса для рабочего эндпоинта
+        params = {
+            "q": query,
+            "page": "1"
+        }
+
+        # Создаем URL с параметрами для рабочего эндпоинта
+        query_string = urlencode(params)
+        endpoint = f"/item_search_2?{query_string}"
+
+        logger.info(f"🔍 API запрос: {endpoint}")
+
+        conn.request("GET", endpoint, headers=headers)
+        res = conn.getresponse()
+        data = res.read()
+
+        logger.info(f"📡 API ответ: {res.status}")
+
+        if res.status != 200:
+            conn.close()
+            raise RuntimeError(f"API returned {res.status}")
+
+        response_text = data.decode("utf-8")
+        data_json = json.loads(response_text)
+
+        conn.close()
+
+        # Обрабатываем ответ с новой структурой
+        items = []
+
+        logger.info(f"📦 Получены данные: {type(data_json)}")
+
+        if 'result' in data_json:
+            result = data_json['result']
+
+            # Проверяем статус
+            status = result.get('status', {})
+            if status.get('code') != 200:
+                logger.warning(f"⚠️ API статус: {status.get('code')}, сообщение: {status.get('msg', {})}")
+
+            result_list = result.get('resultList', [])
+            logger.info(f"📋 Найдено товаров в ответе: {len(result_list)}")
+
+            for prod_wrapper in result_list[:limit]:
+                try:
+                    # Товар находится в поле 'item'
+                    prod = prod_wrapper.get('item', {})
+                    if not prod:
+                        continue
+
+                    # Извлекаем название
+                    name = prod.get('title', '')
+
+                    # Извлекаем цену из sku.def
+                    price = ""
+                    sku = prod.get('sku', {})
+                    if sku and 'def' in sku:
+                        sku_def = sku['def']
+                        price = sku_def.get('promotionPrice') or sku_def.get('price')
+
+                    # Извлекаем URL
+                    item_url = prod.get('itemUrl', '')
+                    full_url = f"https:{item_url}" if item_url.startswith('//') else item_url
+                    if not full_url.startswith('http'):
+                        full_url = f"https://www.aliexpress.com{item_url}"
+
+                    # Извлекаем изображение
+                    image = prod.get('image', '')
+                    if image and image.startswith('//'):
+                        image = f"https:{image}"
+
+                    if name and len(name) > 5:
+                        items.append({
+                            'name': name,
+                            'price': f"${price}" if price else "Цена не указана",
+                            'url': full_url,
+                            'image': image,
+                            'description': 'Источник: AliExpress (API)',
+                            'relevance_score': 85
+                        })
+                        logger.info(f"✅ API товар: {name[:50]} - ${price}")
+
+                except Exception as e:
+                    logger.debug(f"Ошибка обработки товара: {e}")
+                    continue
+
+        if items:
+            logger.info(f"✅ AliExpress API успешен: найдено {len(items)} товаров")
+            return items
+        else:
+            logger.warning("⚠️ AliExpress API не вернул товары")
+            raise RuntimeError("API не вернул товары")
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка AliExpress API: {e}")
+        raise RuntimeError(f"AliExpress API error: {e}")
+
+
+
+if __name__ == '__main__':
+    results = search_aliexpress('iphone 15 pro max', 5)
+    for idx, item in enumerate(results, 1):
+        print(f"{idx}. {item['name']} - {item['price']} -> {item['url']}")

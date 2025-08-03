@@ -31,7 +31,19 @@ project/
 
 ## Setup and Installation
 
-### Option 1: Using the Automated Script
+### Option 1: Quick Setup with Chrome VPN Support
+
+For users who need to use VPN (especially for Allegro.pl access):
+
+```bash
+# 1. Настройка Chrome с VPN
+./setup_chrome_vpn.sh
+
+# 2. Запуск приложения
+./run.sh
+```
+
+### Option 2: Using the Automated Script (Standard)
 
 The easiest way to run the application is to use the provided shell script:
 
@@ -101,6 +113,28 @@ This script will automatically:
    npm start
    ```
    The application will be available at http://localhost:3000
+
+## VPN Setup for Allegro.pl Access
+
+Since Allegro.pl may block access from certain regions, you can use your Chrome browser with VPN.
+
+**📖 Подробные инструкции: [CHROME_VPN_SETUP.md](CHROME_VPN_SETUP.md)**
+
+### Quick Setup:
+```bash
+# Автоматическая настройка и запуск
+./setup_chrome_vpn.sh
+./run.sh
+```
+
+### Alternative: Connect to Running Chrome
+```bash
+# Запуск Chrome с VPN
+./start_chrome_with_vpn.sh
+
+# В .env установите: CONNECT_TO_EXISTING_CHROME=true
+# Затем запустите: ./run.sh
+```
 
 ## Usage
 

@@ -12,7 +12,7 @@ import pandas as pd
 from PIL import Image
 from dotenv import load_dotenv
 
-from allegro import search_allegro_improved as search_allegro
+from allegro_enhanced import search_allegro_enhanced_sync as search_allegro
 from amazon import search_amazon
 from aliexpress import search_aliexpress, search_aliexpress_api
 
@@ -204,18 +204,15 @@ def search():
 
     # Запускаем поиск на всех платформах параллельно
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        # Отключаем Allegro временно
-        # allegro_future = executor.submit(search_allegro_with_fallback, query)
+        # Включаем Allegro обратно
+        allegro_future = executor.submit(search_allegro, query)
         amazon_future = executor.submit(search_amazon, query, limit=10)
         aliexpress_future = executor.submit(search_aliexpress, query, limit=10)
 
         # Получаем результаты
-        # allegro_results = allegro_future.result()
+        allegro_results = allegro_future.result()
         amazon_results = amazon_future.result()
         aliexpress_results = aliexpress_future.result()
-
-    # Временно отключаем Allegro
-    allegro_results = []
 
     # Дополнительная сортировка результатов по релевантности
     def sort_by_relevance(results):
@@ -531,6 +528,11 @@ def process_csv(df):
         df (pandas.DataFrame): DataFrame with product characteristics
     """
     try:
+        # Очищаем старые результаты для получения свежих данных
+        if os.path.exists('backend/results.json'):
+            os.remove('backend/results.json')
+            print("🗑️ Удален старый файл результатов для получения свежих данных")
+
         # Пытаемся использовать улучшенный ProductMatcher
         from product_matcher import ProductMatcher
 
@@ -540,7 +542,7 @@ def process_csv(df):
 
         # Используем ProductMatcher для обработки
         matcher = ProductMatcher()
-        results = matcher.process_file(temp_file, 'results.json')
+        results = matcher.process_file(temp_file, 'backend/results.json')
 
         # Удаляем временный файл
         if os.path.exists(temp_file):
@@ -557,6 +559,11 @@ def process_csv_simple(df):
     """
     Простая обработка CSV файла (fallback)
     """
+    # Очищаем старые результаты
+    if os.path.exists('backend/results.json'):
+        os.remove('backend/results.json')
+        print("🗑️ Удален старый файл результатов (fallback)")
+
     results = []
 
     # Determine which column to use for product names
@@ -587,10 +594,11 @@ def process_csv_simple(df):
                 product_result["amazon_error"] = str(e)
                 print(f"Error searching Amazon for {product_name}: {e}")
 
-            # Search Allegro (temporarily disabled)
+            # Search Allegro
             try:
-                print("🚫 Allegro временно отключен для тестирования")
-                product_result["allegro"] = []
+                allegro_results = search_allegro(str(product_name))
+                product_result["allegro"] = allegro_results[:5]  # Limit to 5 results
+                print(f"Allegro: found {len(allegro_results)} products for {product_name}")
             except Exception as e:
                 product_result["allegro_error"] = str(e)
                 print(f"Error searching Allegro for {product_name}: {e}")
@@ -613,11 +621,11 @@ def process_csv_simple(df):
         # Sleep to avoid rate limiting
         time.sleep(1)
 
-    # Save results to results.json
+    # Save results to backend/results.json
     try:
-        with open('results.json', 'w', encoding='utf-8') as f:
+        with open('backend/results.json', 'w', encoding='utf-8') as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
-        print(f"Results saved to results.json ({len(results)} products processed)")
+        print(f"Results saved to backend/results.json ({len(results)} products processed)")
     except Exception as e:
         print(f"Error saving results to file: {e}")
 
@@ -699,14 +707,14 @@ def get_csv_results():
     """
     try:
         # Check if results.json exists
-        if not os.path.exists('results.json'):
+        if not os.path.exists('backend/results.json'):
             return jsonify({
                 'success': False,
                 'message': 'No results available. Please upload a CSV file first.'
             }), 404
 
         # Read the results.json file
-        with open('results.json', 'r', encoding='utf-8') as f:
+        with open('backend/results.json', 'r', encoding='utf-8') as f:
             results = json.load(f)
 
         return jsonify({

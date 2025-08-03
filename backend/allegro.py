@@ -326,7 +326,24 @@ class AllegroScraper:
     async def detect_captcha(self, page):
         """Обнаружение капчи на странице"""
         try:
-            # Ищем различные элементы капчи
+            # Сначала проверяем, есть ли результаты поиска (если есть, то капчи нет)
+            search_indicators = [
+                'text="ofert"',  # "247 578 ofert"
+                'text="sortowanie"',  # Сортировка
+                'text="trafność"',   # Релевантность
+                'a[href*="/oferta/"]',  # Ссылки на товары
+                'text="Smartfon"',
+                'text="iPhone"',
+                'text="zł"'  # Польская валюта
+            ]
+
+            for indicator in search_indicators:
+                element = page.locator(indicator).first
+                if await element.count() > 0:
+                    logger.info(f"✅ Найдены результаты поиска: {indicator}")
+                    return False  # Капчи нет, есть результаты
+
+            # Ищем различные элементы капчи только если нет результатов
             captcha_selectors = [
                 'iframe[src*="captcha"]',
                 'div[class*="captcha"]',
@@ -381,7 +398,7 @@ class AllegroScraper:
                 logger.info("💡 Добавьте CAPTCHA_API_KEY в файл .env")
                 return False
 
-            logger.info(f"🔑 Используем 2captcha API ключ: {api_key[:10]}...")
+            logger.info(f"🔑 Используем 2captcha API ключ: {api_key[:10]}... (длина: {len(api_key)})")
 
             # Делаем скриншот страницы с капчей
             screenshot_path = 'captcha_screenshot.png'
@@ -394,24 +411,104 @@ class AllegroScraper:
             logger.info("🤖 Отправляем капчу в 2captcha...")
 
             try:
-                result = solver.normal(screenshot_path)
-                captcha_text = result['code']
-                logger.info(f"✅ Капча решена: {captcha_text}")
+                # Используем более точный метод для изображения капчи
+                captcha_image = None
 
-                # Ищем поле ввода капчи и вводим результат
-                input_selectors = [
-                    'input[name*="captcha"]',
-                    'input[id*="captcha"]',
-                    'input[type="text"]',
-                    'input[placeholder*="kod"]'
+                # Ищем изображение капчи
+                captcha_img_selectors = [
+                    'img[src*="captcha"]',
+                    'iframe[src*="captcha"] img',
+                    'canvas',
+                    '.captcha img'
                 ]
 
-                for selector in input_selectors:
-                    input_element = page.locator(selector).first
-                    if await input_element.count() > 0:
-                        await input_element.fill(captcha_text)
-                        logger.info(f"✅ Введен код капчи в поле: {selector}")
-                        break
+                for img_selector in captcha_img_selectors:
+                    try:
+                        img_element = page.locator(img_selector).first
+                        if await img_element.count() > 0:
+                            # Делаем скриншот конкретного элемента
+                            captcha_image = await img_element.screenshot()
+                            logger.info(f"📸 Найдено изображение капчи: {img_selector}")
+                            break
+                    except:
+                        continue
+
+                if captcha_image:
+                    # Сохраняем изображение капчи
+                    with open(screenshot_path, 'wb') as f:
+                        f.write(captcha_image)
+                else:
+                    # Fallback - скриншот всей страницы
+                    await page.screenshot(path=screenshot_path, full_page=True)
+
+                # Определяем тип капчи и используем соответствующий метод
+                page_content = await page.content()
+
+                if 'puzzle' in page_content.lower() or 'jigsaw' in page_content.lower() or 'slider' in page_content.lower():
+                    logger.info("🧩 Обнаружена капча-пазл, используем метод coordinates")
+                    try:
+                        result = solver.coordinates(screenshot_path)
+                        coordinates = result['code']  # Возвращает координаты "x:y"
+                        logger.info(f"✅ Капча-пазл решена, координаты: {coordinates}")
+
+                        # Парсим координаты и кликаем
+                        if ':' in coordinates:
+                            x, y = map(int, coordinates.split(':'))
+
+                            # Ищем элемент пазла для клика
+                            puzzle_selectors = [
+                                'canvas',
+                                '.puzzle-piece',
+                                '.captcha-puzzle',
+                                'iframe[src*="captcha"]'
+                            ]
+
+                            for selector in puzzle_selectors:
+                                try:
+                                    puzzle_element = page.locator(selector).first
+                                    if await puzzle_element.count() > 0:
+                                        await puzzle_element.click(position={'x': x, 'y': y})
+                                        logger.info(f"✅ Клик по пазлу: ({x}, {y}) в {selector}")
+                                        break
+                                except:
+                                    continue
+                        else:
+                            logger.error("❌ Неверный формат координат пазла")
+                            return False
+
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка решения пазл-капчи: {e}")
+                        return False
+
+                else:
+                    # Обычная текстовая капча
+                    logger.info("📝 Обнаружена текстовая капча")
+                    result = solver.normal(screenshot_path)
+                    captcha_text = result['code']
+                    logger.info(f"✅ Текстовая капча решена: {captcha_text}")
+
+                    # Ищем поле ввода для текстовой капчи
+                    input_selectors = [
+                        'input[name*="captcha"]',
+                        'input[id*="captcha"]',
+                        'input[placeholder*="captcha"]',
+                        'input[placeholder*="kod"]',
+                        'input[placeholder*="Przepisz"]',
+                        'input[type="text"]:visible'
+                    ]
+
+                    for selector in input_selectors:
+                        try:
+                            input_element = page.locator(selector).first
+                            if await input_element.count() > 0 and await input_element.is_visible():
+                                await input_element.clear()
+                                await input_element.fill(captcha_text)
+                                logger.info(f"✅ Введен код в поле: {selector}")
+                                break
+                        except:
+                            continue
+
+
 
                 # Ищем кнопку подтверждения
                 submit_selectors = [
@@ -613,13 +710,90 @@ class AllegroScraper:
 
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=True,  # Возвращаем headless режим
-                    args=[
-                        '--no-sandbox',
-                        '--disable-dev-shm-usage'
+                # Настройки браузера для обхода блокировок
+                browser_args = [
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-features=VizDisplayCompositor',
+                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                ]
+
+                # Проверяем настройки прокси
+                import os
+                proxy_server = os.getenv('PROXY_SERVER')
+                proxy_config = None
+
+                if proxy_server:
+                    proxy_config = {
+                        'server': proxy_server,
+                        'username': os.getenv('PROXY_USERNAME'),
+                        'password': os.getenv('PROXY_PASSWORD')
+                    }
+                    logger.info(f"🌐 Используем прокси: {proxy_server}")
+
+                # Проверяем настройки Chrome
+                use_installed_chrome = os.getenv('USE_INSTALLED_CHROME', 'true').lower() == 'true'
+                connect_to_existing = os.getenv('CONNECT_TO_EXISTING_CHROME', 'false').lower() == 'true'
+                chrome_executable_path = os.getenv('CHROME_EXECUTABLE_PATH', '')
+                debug_port = os.getenv('CHROME_DEBUG_PORT', '9222')
+
+                # Пытаемся подключиться к уже запущенному Chrome
+                if connect_to_existing:
+                    try:
+                        logger.info(f"🔗 Подключаемся к запущенному Chrome на порту {debug_port}")
+                        browser = await p.chromium.connect_over_cdp(f"http://localhost:{debug_port}")
+                        logger.info("✅ Успешно подключились к запущенному Chrome с VPN!")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Не удалось подключиться к запущенному Chrome: {e}")
+                        connect_to_existing = False
+
+                # Если не подключились к существующему, запускаем новый
+                if not connect_to_existing:
+                    if use_installed_chrome and chrome_executable_path:
+                        logger.info(f"🌐 Используем установленный Chrome: {chrome_executable_path}")
+                        browser = await p.chromium.launch(
+                            headless=False,
+                            executable_path=chrome_executable_path,
+                            args=browser_args
+                        )
+                    elif use_installed_chrome:
+                    # Пытаемся найти Chrome автоматически
+                    chrome_paths = [
+                        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',  # macOS
+                        '/usr/bin/google-chrome',  # Linux
+                        '/usr/bin/google-chrome-stable',  # Linux
+                        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',  # Windows
+                        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'  # Windows 32-bit
                     ]
-                )
+
+                    chrome_path = None
+                    for path in chrome_paths:
+                        if os.path.exists(path):
+                            chrome_path = path
+                            break
+
+                    if chrome_path:
+                        logger.info(f"🌐 Найден и используем установленный Chrome: {chrome_path}")
+                        browser = await p.chromium.launch(
+                            headless=False,
+                            executable_path=chrome_path,
+                            args=browser_args
+                        )
+                    else:
+                        logger.warning("⚠️ Установленный Chrome не найден, используем Chromium")
+                        browser = await p.chromium.launch(
+                            headless=True,
+                            args=browser_args,
+                            proxy=proxy_config
+                        )
+                else:
+                    logger.info("🌐 Используем встроенный Chromium")
+                    browser = await p.chromium.launch(
+                        headless=True,
+                        args=browser_args,
+                        proxy=proxy_config
+                    )
                 context = await browser.new_context(
                     user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     viewport={'width': 1920, 'height': 1080},
@@ -724,26 +898,20 @@ class AllegroScraper:
                 except Exception as e:
                     logger.error(f"Ошибка диагностики: {e}")
 
-                # Обновляем селекторы для поиска товаров - добавляем более общие селекторы
+                # Актуальные селекторы для Allegro 2025 (на основе реального HTML)
                 selectors_to_try = [
+                    # Основные селекторы из реального HTML
+                    'a[class*="_1e32a_zIS-q"]',     # Ссылки на товары
+                    'div[class="mpof_ki"]',         # Контейнеры товаров
+                    'h2 a[href*="/oferta/"]',       # Заголовки с ссылками
+                    'a[href*="/oferta/"]',          # Все ссылки на товары
+                    # Fallback селекторы
                     'article[data-role="offer"]',
                     'div[data-role="offer"]',
-                    'article[data-analytics-view-label]',
                     '[data-testid="listing-item"]',
-                    'div[data-testid="web-listing-item"]',
-                    'article[data-testid="listing-item"]',
-                    'div[class*="listing-item"]',
-                    'article[class*="offer"]',
-                    'div[class*="offer-item"]',
-                    'section[data-testid="listing-item"]',
-                    # Добавляем более общие селекторы
                     'article',
                     'div[data-testid]',
-                    '[data-testid*="item"]',
-                    '[data-testid*="offer"]',
-                    '[data-testid*="product"]',
-                    'div[class*="item"]',
-                    'section[class*="item"]'
+                    'div[class*="listing"]'
                 ]
 
                 found_products = False
@@ -768,7 +936,11 @@ class AllegroScraper:
 
                                     # Пробуем разные способы получить заголовок и ссылку
                                     title_selectors = [
-                                        'a[href*="/oferta/"]',
+                                        # Актуальные селекторы 2025
+                                        'a[class*="_1e32a_zIS-q"]',  # Основные ссылки
+                                        'h2 a[href*="/oferta/"]',    # Заголовки
+                                        'a[href*="/oferta/"]',       # Все ссылки на товары
+                                        # Fallback
                                         'a[data-testid*="title"]',
                                         'a[data-testid*="name"]',
                                         'h3 a',
@@ -1201,34 +1373,21 @@ def search_allegro_improved(query: str, max_pages: int = 1, debug_mode: bool = F
         current_ip = scraper.get_current_ip()
         logger.info(f"🌐 Текущий IP: {current_ip}")
 
-        # Сначала пробуем простой HTTP поиск с разными User-Agent
-        logger.info(f"🔍 Попытка HTTP поиска на Allegro: {query}")
-        
-        # Пробуем разные User-Agent для обхода блокировок
-        user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
-        ]
-        
-        for i, user_agent in enumerate(user_agents):
-            try:
-                logger.info(f"🔍 Попытка {i+1}/4 с User-Agent: {user_agent[:50]}...")
-                scraper.headers['User-Agent'] = user_agent
-                http_results = scraper.search_products_simple(query)
-                
-                if http_results and len(http_results) > 0:
-                    logger.info(f"✅ HTTP поиск успешен с User-Agent {i+1}: найдено {len(http_results)} товаров")
-                    return http_results
-                    
-            except Exception as e:
-                logger.error(f"❌ Ошибка HTTP поиска с User-Agent {i+1}: {e}")
-                continue
+        # Allegro НЕ ИМЕЕТ API - используем только скрапинг с Playwright и капчей
+        logger.info(f"🔍 Allegro скрапинг с Playwright и капчей: {query}")
 
-        logger.info("⚠️ HTTP поиск не дал результатов, пробуем альтернативные методы...")
+        # Сразу используем Playwright с решением капчи
+        try:
+            logger.info("🔍 Пробуем Playwright с решением капчи...")
+            import asyncio
+            playwright_results = asyncio.run(scraper.search_products(query))
+            if playwright_results and len(playwright_results) > 0:
+                logger.info(f"✅ Playwright поиск: найдено {len(playwright_results)} товаров")
+                return playwright_results
+        except Exception as e:
+            logger.error(f"❌ Ошибка Playwright поиска: {e}")
 
-        # Метод 2: Поиск через категории без CAPTCHA
+        # Метод 3: Поиск через категории
         try:
             logger.info("🔍 Пробуем поиск по категориям...")
             category_results = scraper.search_by_categories(query)
@@ -1238,7 +1397,7 @@ def search_allegro_improved(query: str, max_pages: int = 1, debug_mode: bool = F
         except Exception as e:
             logger.error(f"❌ Ошибка поиска по категориям: {e}")
 
-        # Метод 3: Мобильная версия
+        # Метод 4: Мобильная версия
         try:
             logger.info("🔍 Пробуем мобильную версию...")
             mobile_results = scraper.search_mobile_version(query)

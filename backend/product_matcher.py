@@ -12,7 +12,7 @@ from datetime import datetime
 
 # Импортируем наши модули поиска
 from amazon import search_amazon
-from aliexpress import search_aliexpress_api
+from aliexpress import search_aliexpress
 from allegro import search_allegro_improved
 
 # Настройка логирования
@@ -49,9 +49,8 @@ class ProductMatcher:
             raise
     
     def build_search_query(self, row: pd.Series) -> str:
-        """
-        Формирует поисковый запрос на основе характеристик товара
-        """
+
+
         query_parts = []
         
         # Основные поля для поиска (в порядке приоритета)
@@ -222,7 +221,7 @@ class ProductMatcher:
         # Поиск на AliExpress
         try:
             logger.info(f"Поиск на AliExpress: {query}")
-            aliexpress_products = search_aliexpress_api(query, limit=10)
+            aliexpress_products = search_aliexpress(query, limit=10)
             filtered_aliexpress = self.filter_relevant_products(aliexpress_products, query, characteristics)
             result['aliexpress'] = filtered_aliexpress
             logger.info(f"AliExpress: найдено {len(filtered_aliexpress)} релевантных товаров")
@@ -248,15 +247,20 @@ class ProductMatcher:
 
     def process_file(self, file_path: str, output_file: str = None) -> List[Dict]:
         """
-        Обрабатывает весь файл и возвращает результаты
+        Обрабатывает весь файл и возвращает результаты с принудительным обновлением
         """
+        # Очищаем старые результаты для получения свежих данных
+        if output_file and os.path.exists(output_file):
+            os.remove(output_file)
+            logger.info(f"🗑️ Удален старый файл результатов: {output_file}")
+
         # Читаем файл
         df = self.read_file(file_path)
         self.total_count = len(df)
         self.processed_count = 0
         self.results = []
 
-        logger.info(f"Начинаем обработку {self.total_count} товаров")
+        logger.info(f"🔍 Начинаем обработку {self.total_count} товаров с получением свежих данных")
 
         # Обрабатываем каждую строку
         for index, row in df.iterrows():

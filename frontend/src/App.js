@@ -265,24 +265,32 @@ function App() {
             <div className="mt-8 p-4 bg-white rounded-lg shadow-md">
               <h2 className="text-xl font-semibold mb-3">Результати обробки файлу</h2>
               <div className="mb-4 p-3 bg-gray-50 rounded-md">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
                   <div>
                     <span className="font-medium text-gray-700">Товарів:</span>
                     <span className="ml-1 text-blue-600">{csvResults.length}</span>
                   </div>
                   <div>
-                    <span className="font-medium text-gray-700">Успішність:</span>
-                    <span className="ml-1 text-green-600">100%</span>
-                  </div>
-                  <div>
-                    <span className="font-medium text-gray-700">Результати Amazon:</span>
+                    <span className="font-medium text-gray-700">Amazon:</span>
                     <span className="ml-1 text-orange-600">
                       {csvResults.filter(r => r.amazon && r.amazon.length > 0).length}
                     </span>
                   </div>
                   <div>
-                    <span className="font-medium text-gray-700">Всього знайдено:</span>
+                    <span className="font-medium text-gray-700">Allegro:</span>
                     <span className="ml-1 text-purple-600">
+                      {csvResults.filter(r => r.allegro && r.allegro.length > 0).length}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-700">AliExpress:</span>
+                    <span className="ml-1 text-blue-600">
+                      {csvResults.filter(r => r.aliexpress && r.aliexpress.length > 0).length}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-700">Всього:</span>
+                    <span className="ml-1 text-green-600">
                       {csvResults.reduce((sum, r) => sum + (r.amazon?.length || 0) + (r.allegro?.length || 0) + (r.aliexpress?.length || 0), 0)}
                     </span>
                   </div>
@@ -357,7 +365,7 @@ function App() {
                           ) : result.allegro_error ? (
                             <div className="text-red-500 text-xs">{result.allegro_error}</div>
                           ) : (
-                            <div className="text-gray-400">No results</div>
+                            <div className="text-gray-400">Немає результатів</div>
                           )}
                         </td>
                         <td className="py-2 px-4 border-b border-gray-200 text-sm">
@@ -376,7 +384,7 @@ function App() {
                           ) : result.aliexpress_error ? (
                             <div className="text-red-500 text-xs">{result.aliexpress_error}</div>
                           ) : (
-                            <div className="text-gray-400">No results</div>
+                            <div className="text-gray-400">Немає результатів</div>
                           )}
                         </td>
                       </tr>
@@ -409,9 +417,9 @@ function App() {
               <div className="mt-8">
                 <h2 className="text-2xl font-semibold mb-4">Результати пошуку для "{query}"</h2>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div>
-                    <h3 className="text-xl font-medium mb-3 text-blue-500">Amazon</h3>
+                    <h3 className="text-xl font-medium mb-3 text-orange-500">Amazon</h3>
                     {results.amazon && results.amazon.length > 0 ? (
                         results.amazon.map((product, index) => (
                             <ResultCard key={`amazon-${index}`} product={product} />
@@ -422,13 +430,24 @@ function App() {
                   </div>
 
                   <div>
-                    <h3 className="text-xl font-medium mb-3 text-blue-500">Aliexpress</h3>
+                    <h3 className="text-xl font-medium mb-3 text-purple-500">Allegro</h3>
+                    {results.allegro && results.allegro.length > 0 ? (
+                        results.allegro.map((product, index) => (
+                            <ResultCard key={`allegro-${index}`} product={product} />
+                        ))
+                    ) : (
+                        <p className="text-gray-500">No products found on Allegro</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <h3 className="text-xl font-medium mb-3 text-blue-500">AliExpress</h3>
                     {results.aliexpress && results.aliexpress.length > 0 ? (
                         results.aliexpress.map((product, index) => (
                             <ResultCard key={`aliexpress-${index}`} product={product} />
                         ))
                     ) : (
-                        <p className="text-gray-500">No products found on Aliexpress</p>
+                        <p className="text-gray-500">No products found on AliExpress</p>
                     )}
                   </div>
                 </div>

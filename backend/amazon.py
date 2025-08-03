@@ -3,14 +3,15 @@ from bs4 import BeautifulSoup
 import logging
 import time
 import random
+import os
 from urllib.parse import urlencode, quote_plus
+from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
 def matches_query(product_name, query, min_score=30):
     """
-    Проверяет, соответствует ли название товара поисковому запросу
-    Улучшенная версия для более точного поиска iPhone и других товаров
+
     """
     if not product_name or not query:
         return False
@@ -41,7 +42,7 @@ def matches_query(product_name, query, min_score=30):
                 score += 40  # Большой бонус за длинные слова
             matched_words += 1
 
-    # Бонус за процент совпавших слов
+
     if len(query_words) > 0:
         match_percentage = matched_words / len(query_words)
         score += int(match_percentage * 60)  # До 60 дополнительных баллов
@@ -86,12 +87,12 @@ def matches_query(product_name, query, min_score=30):
     # Специальные правила для iPhone
     if 'iphone' in query_lower:
         # Бонус за точную модель iPhone
-        if '15' in query_lower and '15' in product_lower:
-            score += 50
+        if '16' in query_lower and '16' in product_lower:
+            score += 60
         if 'pro' in query_lower and 'pro' in product_lower:
-            score += 40
+            score += 50
         if 'max' in query_lower and 'max' in product_lower:
-            score += 40
+            score += 50
         
         # Бонус за товары, которые точно являются смартфонами
         phone_keywords = ['gb', 'tb', 'handy', 'smartphone', 'mobile', 'telefon', 'phone']
@@ -142,9 +143,9 @@ def matches_query(product_name, query, min_score=30):
     if len(product_name) > 200:
         score -= 20
 
-    # Штраф за слишком короткие названия
+
     if len(product_name) < 10:
-        score -= 25
+        score -= 20
 
     # Бонус за наличие ключевых слов в правильных местах
     key_positions = ['tool', 'kit', 'set', 'professional', 'premium', 'electric', 'electronic']
@@ -156,7 +157,7 @@ def matches_query(product_name, query, min_score=30):
     irrelevant_words = ['case', 'cover', 'protector', 'screen', 'film', 'adapter', 'cable', 'charger']
     for word in irrelevant_words:
         if word in product_lower and word not in query_lower:
-            score -= 15
+            score -= 5
 
     # Финальная проверка минимального score
     if score >= min_score:
@@ -202,14 +203,7 @@ def search_amazon(query, limit=10, max_pages=1):
 
         soup = BeautifulSoup(response.content, 'html.parser')
 
-        # Сохраняем HTML для отладки Apple товаров
-        if 'apple mouse' in query.lower():
-            try:
-                with open('backend/debug_amazon_apple_mouse.html', 'w', encoding='utf-8') as f:
-                    f.write(soup.prettify())
-                logger.info("💾 Сохранен HTML для отладки: debug_amazon_apple_mouse.html")
-            except Exception as e:
-                logger.debug(f"Не удалось сохранить HTML: {e}")
+
 
         # Ищем товары на странице
         products = soup.find_all('div', {'data-component-type': 's-search-result'})
