@@ -235,7 +235,10 @@ class AllegroEnhancedScraper:
                 'input[value*="potwierdzam"]',
                 'input[value*="Potwierdź"]',
                 '[role="button"]:has-text("potwierdzam")',
-                'a:has-text("potwierdzam")'
+                'a:has-text("potwierdzam")',
+                'button[class*="confirm"]',
+                'button[class*="accept"]',
+                'input[type="submit"]'
             ]
 
             for selector in simple_confirm_buttons:
@@ -257,9 +260,12 @@ class AllegroEnhancedScraper:
                     logger.debug(f"Кнопка {selector} не найдена: {e}")
                     continue
 
-            api_key = os.getenv('CAPTCHA_API_KEY')
+            # Проверяем API ключ для 2captcha
+            api_key = os.getenv('CAPTCHA_API_KEY', '9ed0ef51badf9a017ac50aea413d8001')  # Используем предоставленный ключ
             if not api_key:
                 logger.warning("⚠️ CAPTCHA_API_KEY не найден в переменных окружения")
+                logger.info("💡 Добавьте CAPTCHA_API_KEY в .env файл или переменные окружения")
+                logger.info("💡 Пример: CAPTCHA_API_KEY=your_2captcha_api_key_here")
                 return False
 
             logger.info(f"🔑 Используем 2captcha API ключ: {api_key[:10]}...")
@@ -310,180 +316,214 @@ class AllegroEnhancedScraper:
                     break
 
             # Используем 2captcha
-            try:
-                from twocaptcha import TwoCaptcha
-                solver = TwoCaptcha(api_key)
+            from twocaptcha import TwoCaptcha
+            solver = TwoCaptcha(api_key)
 
-                logger.info("📤 Отправляем CAPTCHA в 2captcha сервис...")
+            logger.info("📤 Отправляем CAPTCHA в 2captcha сервис...")
 
-                # Определяем тип CAPTCHA
-                page_content = await page.content()
+            # Определяем тип CAPTCHA
+            page_content = await page.content()
 
-                if any(keyword in page_content.lower() for keyword in ['recaptcha', 'g-recaptcha']):
-                    logger.info("🔄 Обнаружена reCAPTCHA")
-                    # Для reCAPTCHA нужен site key
-                    site_key_match = page_content.find('data-sitekey="')
-                    if site_key_match != -1:
-                        start = site_key_match + len('data-sitekey="')
-                        end = page_content.find('"', start)
-                        site_key = page_content[start:end]
-                        logger.info(f"🔑 Site key найден: {site_key}")
+            if any(keyword in page_content.lower() for keyword in ['recaptcha', 'g-recaptcha']):
+                logger.info("🔄 Обнаружена reCAPTCHA")
+                # Для reCAPTCHA нужен site key
+                site_key_match = page_content.find('data-sitekey="')
+                if site_key_match != -1:
+                    start = site_key_match + len('data-sitekey="')
+                    end = page_content.find('"', start)
+                    site_key = page_content[start:end]
+                    logger.info(f"🔑 Site key найден: {site_key}")
 
-                        result = solver.recaptcha(
-                            sitekey=site_key,
-                            url=page.url
-                        )
-                        captcha_token = result['code']
-                        logger.info("✅ reCAPTCHA решена!")
+                    result = solver.recaptcha(
+                        sitekey=site_key,
+                        url=page.url
+                    )
+                    captcha_token = result['code']
+                    logger.info("✅ reCAPTCHA решена!")
 
-                        # Вставляем токен в форму
-                        await page.evaluate(f"""
-                            document.getElementById('g-recaptcha-response').innerHTML = '{captcha_token}';
-                            if (window.grecaptcha) {{
-                                window.grecaptcha.getResponse = function() {{ return '{captcha_token}'; }};
-                            }}
-                        """)
-                    else:
-                        logger.warning("⚠️ Site key для reCAPTCHA не найден")
-                        return False
-
-                elif any(keyword in page_content.lower() for keyword in ['hcaptcha', 'h-captcha']):
-                    logger.info("🔄 Обнаружена hCaptcha")
-                    # Аналогично для hCaptcha
-                    site_key_match = page_content.find('data-sitekey="')
-                    if site_key_match != -1:
-                        start = site_key_match + len('data-sitekey="')
-                        end = page_content.find('"', start)
-                        site_key = page_content[start:end]
-
-                        result = solver.hcaptcha(
-                            sitekey=site_key,
-                            url=page.url
-                        )
-                        captcha_token = result['code']
-                        logger.info("✅ hCaptcha решена!")
-
-                        # Вставляем токен
-                        await page.evaluate(f"""
-                            document.querySelector('[name="h-captcha-response"]').value = '{captcha_token}';
-                        """)
-                    else:
-                        logger.warning("⚠️ Site key для hCaptcha не найден")
-                        return False
-
+                    # Вставляем токен в форму
+                    await page.evaluate(f"""
+                        document.getElementById('g-recaptcha-response').innerHTML = '{captcha_token}';
+                        if (window.grecaptcha) {{
+                            window.grecaptcha.getResponse = function() {{ return '{captcha_token}'; }};
+                        }}
+                    """)
                 else:
-                    # Обычная текстовая CAPTCHA
-                    logger.info("📝 Обнаружена текстовая CAPTCHA")
-                    result = solver.normal(screenshot_path)
-                    captcha_text = result['code']
-                    logger.info(f"✅ Текстовая CAPTCHA решена: {captcha_text}")
-
-                    # Ищем поле ввода для текстовой CAPTCHA
-                    input_selectors = [
-                        'input[name*="captcha"]',
-                        'input[id*="captcha"]',
-                        'input[placeholder*="captcha"]',
-                        'input[placeholder*="kod"]',
-                        'input[placeholder*="Przepisz"]',
-                        'input[type="text"]:visible'
-                    ]
-
-                    input_found = False
-                    for selector in input_selectors:
-                        try:
-                            input_element = page.locator(selector).first
-                            if await input_element.count() > 0 and await input_element.is_visible():
-                                await input_element.clear()
-                                await input_element.fill(captcha_text)
-                                logger.info(f"✅ Код введен в поле: {selector}")
-                                input_found = True
-                                break
-                        except Exception as e:
-                            logger.debug(f"Селектор {selector} не сработал: {e}")
-                            continue
-
-                    if not input_found:
-                        logger.warning("⚠️ Поле ввода CAPTCHA не найдено")
-                        return False
-
-                # Ищем и нажимаем кнопку подтверждения
-                submit_selectors = [
-                    'button:has-text("POTWIERDŹ")',
-                    'button:has-text("Wyślij")',
-                    'button:has-text("Submit")',
-                    'button[type="submit"]',
-                    'input[type="submit"]',
-                    'button[class*="submit"]',
-                    'button[class*="confirm"]'
-                ]
-
-                submit_found = False
-                for selector in submit_selectors:
-                    try:
-                        submit_button = page.locator(selector).first
-                        if await submit_button.count() > 0 and await submit_button.is_visible():
-                            await submit_button.click()
-                            logger.info(f"✅ Нажата кнопка подтверждения: {selector}")
-                            submit_found = True
-                            break
-                    except Exception as e:
-                        logger.debug(f"Кнопка {selector} не сработала: {e}")
-                        continue
-
-                if not submit_found:
-                    logger.warning("⚠️ Кнопка подтверждения не найдена, пробуем Enter")
-                    await page.keyboard.press('Enter')
-
-                # Ждем загрузки страницы
-                logger.info("⏳ Ждем загрузки страницы после решения CAPTCHA...")
-                await asyncio.sleep(3)
-                await page.wait_for_load_state("networkidle", timeout=15000)
-
-                # Проверяем, решена ли CAPTCHA
-                if not await self._detect_captcha(page):
-                    logger.info("🎉 CAPTCHA успешно решена автоматически!")
-                    return True
-                else:
-                    logger.warning("⚠️ CAPTCHA все еще присутствует после автоматического решения")
+                    logger.warning("⚠️ Site key для reCAPTCHA не найден")
                     return False
 
-            except Exception as e:
-                logger.error(f"❌ Ошибка автоматического решения CAPTCHA: {e}")
+            elif any(keyword in page_content.lower() for keyword in ['hcaptcha', 'h-captcha']):
+                logger.info("🔄 Обнаружена hCaptcha")
+                # Для hCaptcha нужен site key
+                site_key_match = page_content.find('data-sitekey="')
+                if site_key_match != -1:
+                    start = site_key_match + len('data-sitekey="')
+                    end = page_content.find('"', start)
+                    site_key = page_content[start:end]
+                    logger.info(f"🔑 Site key найден: {site_key}")
 
-                # Подробная диагностика ошибок 2captcha
-                error_str = str(e).upper()
+                    result = solver.hcaptcha(
+                        sitekey=site_key,
+                        url=page.url
+                    )
+                    captcha_token = result['code']
+                    logger.info("✅ hCaptcha решена!")
 
-                if 'ERROR_WRONG_USER_KEY' in error_str:
-                    logger.error("❌ Неверный API ключ 2captcha!")
-                    logger.info("💡 Проверьте CAPTCHA_API_KEY в .env файле")
-                    logger.info("💡 Получите ключ на: https://2captcha.com/enterpage")
-                elif 'ERROR_ZERO_BALANCE' in error_str:
-                    logger.error("❌ Нулевой баланс на аккаунте 2captcha!")
-                    logger.info("💡 Пополните баланс на: https://2captcha.com/pay")
-                elif 'ERROR_NO_SLOT_AVAILABLE' in error_str:
-                    logger.error("❌ Нет доступных слотов в 2captcha")
-                    logger.info("💡 Попробуйте позже или используйте другой сервис")
-                elif 'ERROR_CAPTCHA_UNSOLVABLE' in error_str:
-                    logger.error("❌ CAPTCHA не может быть решена автоматически")
-                    logger.info("💡 Попробуйте ручное решение")
-                elif 'ERROR_BAD_TOKEN_OR_PAGEURL' in error_str:
-                    logger.error("❌ Неверный токен или URL страницы")
-                elif 'TIMEOUT' in error_str or 'TIMED OUT' in error_str:
-                    logger.error("❌ Таймаут при решении CAPTCHA")
-                    logger.info("💡 Сервис 2captcha перегружен, попробуйте позже")
-                elif 'CONNECTION' in error_str or 'NETWORK' in error_str:
-                    logger.error("❌ Проблемы с сетевым подключением к 2captcha")
-                    logger.info("💡 Проверьте интернет-соединение")
+                    # Вставляем токен в форму
+                    await page.evaluate(f"""
+                        document.querySelector('[name="h-captcha-response"]').value = '{captcha_token}';
+                    """)
                 else:
-                    logger.error(f"❌ Неизвестная ошибка 2captcha: {e}")
-                    logger.info("💡 Проверьте логи и документацию 2captcha")
+                    logger.warning("⚠️ Site key для hCaptcha не найден")
+                    return False
 
-                # Пытаемся ручное решение как fallback
-                logger.info("🔄 Пробуем ручное решение как fallback...")
-                return await self._wait_for_manual_captcha_solution(page)
+            else:
+                logger.info("🖼️ Обнаружена обычная CAPTCHA")
+                # Ищем изображение CAPTCHA с различными селекторами
+                captcha_image_selectors = [
+                    'img[src*="captcha"]',
+                    'img[src*="recaptcha"]',
+                    'img[src*="challenge"]',
+                    'img[alt*="captcha"]',
+                    'img[alt*="recaptcha"]',
+                    'img[class*="captcha"]',
+                    'img[class*="recaptcha"]',
+                    'img[data-src*="captcha"]',
+                    'img[data-src*="recaptcha"]',
+                    'iframe[src*="captcha"]',
+                    'iframe[src*="recaptcha"]',
+                    'div[class*="captcha"] img',
+                    'div[class*="recaptcha"] img'
+                ]
+                
+                captcha_image = None
+                for selector in captcha_image_selectors:
+                    try:
+                        captcha_image = page.locator(selector).first
+                        if await captcha_image.count() > 0:
+                            logger.info(f"🖼️ Найдено изображение CAPTCHA с селектором: {selector}")
+                            break
+                    except:
+                        continue
+                
+                if captcha_image and await captcha_image.count() > 0:
+                    image_src = await captcha_image.get_attribute('src') or await captcha_image.get_attribute('data-src')
+                    if image_src:
+                        logger.info(f"🖼️ Найдено изображение CAPTCHA: {image_src}")
+                        
+                        # Если это iframe, нужно получить изображение из iframe
+                        if 'iframe' in selector:
+                            logger.info("��️ CAPTCHA в iframe, пытаемся получить изображение...")
+                            try:
+                                # Переключаемся на iframe
+                                frame = page.frame_locator(selector).first
+                                if frame:
+                                    # Ищем изображение CAPTCHA в iframe
+                                    iframe_image_selectors = [
+                                        'img[src*="captcha"]',
+                                        'img[src*="challenge"]',
+                                        'img[alt*="captcha"]',
+                                        'img[class*="captcha"]',
+                                        'img[class*="challenge"]',
+                                        'canvas',
+                                        'img'
+                                    ]
+                                    
+                                    for iframe_selector in iframe_image_selectors:
+                                        try:
+                                            iframe_image = frame.locator(iframe_selector).first
+                                            if await iframe_image.count() > 0:
+                                                iframe_src = await iframe_image.get_attribute('src')
+                                                if iframe_src and ('captcha' in iframe_src.lower() or 'challenge' in iframe_src.lower()):
+                                                    image_src = iframe_src
+                                                    logger.info(f"🖼️ Изображение из iframe: {image_src}")
+                                                    break
+                                        except:
+                                            continue
+                                    
+                                    # Если не нашли изображение в iframe, пробуем получить скриншот iframe
+                                    if not image_src or 'logo.png' in image_src:
+                                        logger.info("🖼️ Пробуем получить скриншот iframe...")
+                                        try:
+                                            # Делаем скриншот iframe
+                                            iframe_screenshot = await frame.screenshot()
+                                            if iframe_screenshot:
+                                                # Сохраняем скриншот
+                                                screenshot_path = os.path.join(os.path.dirname(__file__), 'iframe_captcha.png')
+                                                with open(screenshot_path, 'wb') as f:
+                                                    f.write(iframe_screenshot)
+                                                logger.info(f"📸 Скриншот iframe сохранен: {screenshot_path}")
+                                                image_src = screenshot_path
+                                        except Exception as e:
+                                            logger.debug(f"Ошибка получения скриншота iframe: {e}")
+                                            
+                            except Exception as e:
+                                logger.debug(f"Ошибка получения изображения из iframe: {e}")
+                            
+                        # Решаем обычную CAPTCHA
+                        if image_src and not image_src.startswith('//') and not 'logo.png' in image_src:
+                            try:
+                                result = solver.normal(image_src)
+                                captcha_text = result['code']
+                                logger.info(f"✅ CAPTCHA решена: {captcha_text}")
+                                
+                                # Вставляем решение в поле ввода
+                                captcha_input_selectors = [
+                                    'input[name*="captcha"]',
+                                    'input[id*="captcha"]',
+                                    'input[placeholder*="captcha"]',
+                                    'input[placeholder*="kod"]',
+                                    'input[placeholder*="Przepisz"]',
+                                    'input[type="text"]:visible',
+                                    'textarea[name*="captcha"]'
+                                ]
+                                
+                                captcha_input = None
+                                for input_selector in captcha_input_selectors:
+                                    try:
+                                        captcha_input = page.locator(input_selector).first
+                                        if await captcha_input.count() > 0:
+                                            logger.info(f"✅ Найдено поле ввода CAPTCHA: {input_selector}")
+                                            break
+                                    except:
+                                        continue
+                                
+                                if captcha_input and await captcha_input.count() > 0:
+                                    await captcha_input.fill(captcha_text)
+                                    logger.info("✅ Решение CAPTCHA вставлено в поле")
+                                else:
+                                    logger.warning("⚠️ Поле для ввода CAPTCHA не найдено")
+                                    return False
+                            except Exception as e:
+                                logger.error(f"❌ Ошибка решения CAPTCHA: {e}")
+                                return False
+                        else:
+                            logger.warning("⚠️ Не удалось получить правильное изображение CAPTCHA")
+                            return False
+                    else:
+                        logger.warning("⚠️ Изображение CAPTCHA не найдено")
+                        return False
+                else:
+                    logger.warning("⚠️ Изображение CAPTCHA не найдено")
+                    return False
 
+            # Нажимаем кнопку отправки формы
+            submit_button = page.locator('input[type="submit"], button[type="submit"], button:has-text("Submit"), button:has-text("Potwierdź")').first
+            if await submit_button.count() > 0:
+                await submit_button.click()
+                logger.info("✅ Форма отправлена")
+                await asyncio.sleep(3)
+                return True
+            else:
+                logger.warning("⚠️ Кнопка отправки формы не найдена")
+                return False
+
+        except ImportError:
+            logger.error("❌ Модуль 2captcha не установлен")
+            logger.info("💡 Установите модуль: pip install 2captcha-python")
+            return False
         except Exception as e:
-            logger.error(f"❌ Критическая ошибка решения CAPTCHA: {e}")
+            logger.error(f"❌ Ошибка решения CAPTCHA: {e}")
             return False
 
     async def _wait_for_manual_captcha_solution(self, page: Page) -> bool:
@@ -671,7 +711,12 @@ class AllegroEnhancedScraper:
             '--disable-client-side-phishing-detection',
             '--disable-component-update',
             '--disable-domain-reliability',
-            '--remote-debugging-port=9222'  # Для подключения к существующему Chrome
+            '--remote-debugging-port=9222',  # Для подключения к существующему Chrome
+            '--disable-extensions',
+            '--disable-plugins',
+            '--disable-images',  # Отключаем загрузку изображений для ускорения
+            '--disable-javascript',  # Временно отключаем JS для обхода защиты
+            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         ]
 
         # Запускаем браузер
@@ -698,7 +743,7 @@ class AllegroEnhancedScraper:
             if use_installed_chrome and chrome_executable_path:
                 logger.info(f"🌐 Используем установленный Chrome: {chrome_executable_path}")
                 browser = await playwright.chromium.launch(
-                    headless=False,
+                    headless=True,  # Изменено на headless для стабильности
                     executable_path=chrome_executable_path,
                     args=browser_args
                 )
@@ -721,21 +766,21 @@ class AllegroEnhancedScraper:
                 if chrome_path:
                     logger.info(f"🌐 Найден и используем установленный Chrome: {chrome_path}")
                     browser = await playwright.chromium.launch(
-                        headless=False,
+                        headless=True,  # Изменено на headless для стабильности
                         executable_path=chrome_path,
                         args=browser_args
                     )
                 else:
                     logger.warning("⚠️ Установленный Chrome не найден, используем Chromium")
                     browser = await playwright.chromium.launch(
-                        headless=False,
+                        headless=True,  # Изменено на headless для стабильности
                         args=browser_args,
                         proxy=proxy_config
                     )
             else:
                 logger.info("🌐 Используем встроенный Chromium")
                 browser = await playwright.chromium.launch(
-                    headless=False,
+                    headless=True,  # Изменено на headless для стабильности
                     args=browser_args,
                     proxy=proxy_config
                 )
@@ -747,72 +792,27 @@ class AllegroEnhancedScraper:
             locale='pl-PL',
             timezone_id='Europe/Warsaw',
             geolocation={'latitude': 52.2297, 'longitude': 21.0122},  # Варшава
-            permissions=['geolocation']
+            permissions=['geolocation'],
+            extra_http_headers={
+                'Accept-Language': 'pl-PL,pl;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'DNT': '1'
+            }
         )
         
-        # Добавляем скрипты для обхода детекции ботов
-        await context.add_init_script("""
-            // Удаляем webdriver property
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined,
-            });
-
-            // Переопределяем plugins
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [1, 2, 3, 4, 5],
-            });
-
-            // Переопределяем languages
-            Object.defineProperty(navigator, 'languages', {
-                get: () => ['pl-PL', 'pl', 'en-US', 'en'],
-            });
-
-            // Удаляем chrome runtime
-            if (window.chrome) {
-                delete window.chrome.runtime;
-            }
-
-            // Переопределяем permissions
-            const originalQuery = window.navigator.permissions.query;
-            window.navigator.permissions.query = (parameters) => (
-                parameters.name === 'notifications' ?
-                    Promise.resolve({ state: Notification.permission }) :
-                    originalQuery(parameters)
-            );
-
-            // Скрываем автоматизацию
-            const getParameter = WebGLRenderingContext.getParameter;
-            WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                if (parameter === 37445) {
-                    return 'Intel Inc.';
-                }
-                if (parameter === 37446) {
-                    return 'Intel Iris OpenGL Engine';
-                }
-                return getParameter(parameter);
-            };
-
-            // Добавляем случайность в mouse events
-            ['mousedown', 'mouseup', 'mousemove'].forEach(eventType => {
-                document.addEventListener(eventType, function(e) {
-                    e.isTrusted = true;
-                }, true);
-            });
-        """)
-        
+        # Создаем страницу
         page = await context.new_page()
         
-        # Устанавливаем дополнительные заголовки
-        await page.set_extra_http_headers({
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'pl-PL,pl;q=0.9,en;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none'
-        })
+        # Устанавливаем таймауты
+        page.set_default_timeout(60000)  # 60 секунд
+        page.set_default_navigation_timeout(60000)  # 60 секунд
         
         return browser, context, page
 
@@ -824,11 +824,17 @@ class AllegroEnhancedScraper:
             url = ""
 
             title_selectors = [
-                'a[class*="_1e32a_zIS-q"]',  # Актуальные селекторы 2025
+                # Новые селекторы Allegro 2025
+                'a[class*="_1e32a_zIS-q"]',  # Основной селектор ссылок
                 'h2 a[href*="/oferta/"]',
+                'h3 a[href*="/oferta/"]',
                 'a[href*="/oferta/"]',
                 'a[data-testid*="title"]',
-                'h3 a', 'h2 a', 'a[title]'
+                'h3 a', 'h2 a', 'a[title]',
+                # Fallback селекторы
+                'a[class*="title"]',
+                'a[class*="name"]',
+                'a[class*="product"]'
             ]
 
             for selector in title_selectors:
@@ -849,19 +855,24 @@ class AllegroEnhancedScraper:
 
             # Проверяем релевантность
             relevance_score = self._calculate_relevance_score(title, query)
-            if relevance_score < 25.0:  # Минимальный порог релевантности
+            if relevance_score < 20.0:  # Сниженный порог релевантности
                 return None
 
             # Извлекаем цену
             price = ""
             price_selectors = [
+                # Новые селекторы цен Allegro 2025
                 'span:has-text("zł")',
                 'div:has-text("zł")',
                 '*:has-text("zł")',
                 '[data-testid*="price"]',
                 'span[class*="price"]',
                 'div[class*="price"]',
-                '[data-role="price"]'
+                '[data-role="price"]',
+                # Fallback селекторы
+                'span[class*="amount"]',
+                'div[class*="amount"]',
+                'span[class*="value"]'
             ]
 
             for selector in price_selectors:
@@ -886,6 +897,9 @@ class AllegroEnhancedScraper:
                 except:
                     pass
 
+            if not price:
+                price = "Цена не указана"
+
             # Извлекаем продавца
             seller = ""
             seller_selectors = [
@@ -894,7 +908,9 @@ class AllegroEnhancedScraper:
                 'span:has-text("od ")',
                 'div:has-text("Sprzedawca")',
                 '[class*="seller"]',
-                '[class*="shop"]'
+                '[class*="shop"]',
+                'span[class*="seller"]',
+                'div[class*="seller"]'
             ]
 
             for selector in seller_selectors:
@@ -908,6 +924,9 @@ class AllegroEnhancedScraper:
                 except:
                     continue
 
+            if not seller:
+                seller = "Продавец не указан"
+
             # Извлекаем информацию о доставке/наличии
             availability = ""
             availability_selectors = [
@@ -915,7 +934,9 @@ class AllegroEnhancedScraper:
                 'span:has-text("wysyłka")',
                 'div:has-text("dostępny")',
                 '[data-testid*="delivery"]',
-                '[data-testid*="shipping"]'
+                '[data-testid*="shipping"]',
+                'span[class*="delivery"]',
+                'div[class*="delivery"]'
             ]
 
             for selector in availability_selectors:
@@ -929,6 +950,9 @@ class AllegroEnhancedScraper:
                 except:
                     continue
 
+            if not availability:
+                availability = "Информация о доставке недоступна"
+
             # Извлекаем рейтинг
             rating = ""
             rating_selectors = [
@@ -936,7 +960,9 @@ class AllegroEnhancedScraper:
                 'span:has-text("★")',
                 'div:has-text("★")',
                 '[class*="rating"]',
-                '[class*="star"]'
+                '[class*="star"]',
+                'span[class*="rating"]',
+                'div[class*="rating"]'
             ]
 
             for selector in rating_selectors:
@@ -950,55 +976,52 @@ class AllegroEnhancedScraper:
                 except:
                     continue
 
+            if not rating:
+                rating = "Рейтинг не указан"
+
             # Извлекаем изображение
             image = ""
             image_selectors = [
                 'img[src*="allegro"]',
                 'img[data-src*="allegro"]',
-                'img[src]',
-                'img[data-src]'
+                'img[class*="image"]',
+                'img[class*="photo"]',
+                'img'
             ]
 
             for selector in image_selectors:
                 try:
-                    img_element = product_element.locator(selector).first
-                    if await img_element.count() > 0:
-                        src = await img_element.get_attribute('src') or await img_element.get_attribute('data-src')
-                        if src:
-                            if src.startswith('//'):
-                                image = f"https:{src}"
-                            elif src.startswith('/'):
-                                image = f"https://allegro.pl{src}"
-                            else:
-                                image = src
+                    image_element = product_element.locator(selector).first
+                    if await image_element.count() > 0:
+                        image_src = await image_element.get_attribute('src') or await image_element.get_attribute('data-src')
+                        if image_src:
+                            image = image_src
                             break
                 except:
                     continue
 
-            # Исправляем URL
-            if url and not url.startswith('http'):
-                if url.startswith('/'):
-                    url = f"https://allegro.pl{url}"
-                else:
-                    url = f"https://allegro.pl/{url}"
-            elif not url:
-                # Создаем поисковую ссылку как fallback
-                url = f"https://allegro.pl/listing?string={query.replace(' ', '+')}"
+            # Формируем URL если не найден
+            if not url:
+                url = f"https://allegro.pl/listing?string={quote_plus(query)}"
 
-            return {
+            # Создаем объект товара
+            product_data = {
                 'name': title,
-                'price': price if price else "Цена не указана",
-                'url': url,
+                'price': price,
+                'url': url if url.startswith('http') else f"https://allegro.pl{url}",
                 'image': image,
-                'seller': seller if seller else "Продавец не указан",
-                'availability': availability if availability else "Информация о доставке недоступна",
-                'rating': rating if rating else "Рейтинг не указан",
-                'description': f"Источник: Allegro, Релевантность: {relevance_score:.1f}",
-                'relevance_score': relevance_score
+                'seller': seller,
+                'availability': availability,
+                'rating': rating,
+                'description': f'Источник: Allegro, Поиск: {query}',
+                'relevance_score': relevance_score,
+                'source': 'Allegro'
             }
 
+            return product_data
+
         except Exception as e:
-            logger.debug(f"Ошибка извлечения данных товара: {e}")
+            logger.debug(f"Ошибка извлечения данных о товаре: {e}")
             return None
 
     async def search_products(self, query: str, max_pages: int = 1, max_retries: int = 3) -> List[Dict[str, Any]]:
@@ -1011,6 +1034,10 @@ class AllegroEnhancedScraper:
         logger.info(f"🔍 Начинаем поиск на Allegro: '{query}' → '{translated_query}'")
 
         for attempt in range(max_retries):
+            browser = None
+            context = None
+            page = None
+            
             try:
                 # Получаем прокси для этой попытки
                 proxy_config = self._get_random_proxy()
@@ -1025,8 +1052,8 @@ class AllegroEnhancedScraper:
                 try:
                     # Переходим на главную страницу сначала
                     logger.info("🏠 Переходим на главную страницу Allegro...")
-                    await page.goto(self.base_url, timeout=30000)
-                    await page.wait_for_load_state("domcontentloaded")
+                    await page.goto(self.base_url, timeout=60000)
+                    await page.wait_for_load_state("domcontentloaded", timeout=30000)
 
                     # Имитируем человеческое поведение
                     await self._human_like_behavior(page)
@@ -1038,8 +1065,8 @@ class AllegroEnhancedScraper:
                     search_url = f"{self.search_url}?string={quote_plus(translated_query)}"
                     logger.info(f"🔍 Переходим к поиску: {search_url}")
 
-                    await page.goto(search_url, timeout=30000)
-                    await page.wait_for_load_state("networkidle", timeout=20000)
+                    await page.goto(search_url, timeout=60000)
+                    await page.wait_for_load_state("networkidle", timeout=30000)
 
                     # Еще раз имитируем поведение пользователя
                     await self._human_like_behavior(page)
@@ -1052,7 +1079,6 @@ class AllegroEnhancedScraper:
                             await asyncio.sleep(3)
                         else:
                             logger.error("❌ Не удалось решить CAPTCHA")
-                            await browser.close()
                             continue  # Пробуем следующую попытку
 
                     # Ищем товары на странице
@@ -1061,26 +1087,34 @@ class AllegroEnhancedScraper:
                     if products_found:
                         products.extend(products_found)
                         logger.info(f"✅ Найдено {len(products_found)} товаров")
-                        await browser.close()
                         break  # Успешно нашли товары, выходим из цикла попыток
                     else:
                         logger.warning(f"⚠️ Товары не найдены на попытке {attempt + 1}")
 
                 except Exception as e:
                     logger.error(f"❌ Ошибка на попытке {attempt + 1}: {e}")
-
-                finally:
-                    await browser.close()
-
-                # Задержка между попытками
-                if attempt < max_retries - 1:
-                    delay = random.uniform(5.0, 10.0)
-                    logger.info(f"⏳ Ждем {delay:.1f} секунд перед следующей попыткой...")
-                    await asyncio.sleep(delay)
+                    # Продолжаем с следующей попыткой
 
             except Exception as e:
                 logger.error(f"❌ Критическая ошибка на попытке {attempt + 1}: {e}")
                 continue
+            finally:
+                # Закрываем браузер в любом случае
+                try:
+                    if page:
+                        await page.close()
+                    if context:
+                        await context.close()
+                    if browser:
+                        await browser.close()
+                except Exception as e:
+                    logger.debug(f"Ошибка при закрытии браузера: {e}")
+
+            # Задержка между попытками
+            if attempt < max_retries - 1:
+                delay = random.uniform(5.0, 10.0)
+                logger.info(f"⏳ Ждем {delay:.1f} секунд перед следующей попыткой...")
+                await asyncio.sleep(delay)
 
         # Сортируем результаты по релевантности
         if products:
@@ -1106,15 +1140,22 @@ class AllegroEnhancedScraper:
                     await page.wait_for_load_state("networkidle", timeout=20000)
                     await self._human_like_behavior(page)
 
-                # Ищем товары с помощью различных селекторов
+                # Ищем товары с помощью различных селекторов (обновленные для 2025)
                 product_selectors = [
+                    # Новые селекторы Allegro 2025
+                    '[data-testid="listing-item"]',
                     'article[data-role="offer"]',
                     'div[data-role="offer"]',
-                    'a[class*="_1e32a_zIS-q"]',
-                    'div[class="mpof_ki"]',
-                    '[data-testid="listing-item"]',
+                    'div[class*="mpof_ki"]',  # Основной контейнер товара
+                    'div[class*="_1e32a_zIS-q"]',  # Контейнер с товарами
+                    'a[href*="/oferta/"]',  # Ссылки на товары
+                    'div[class*="listing-item"]',
                     'article',
-                    'div[data-testid]'
+                    'div[data-testid]',
+                    # Fallback селекторы
+                    'div[class*="product"]',
+                    'div[class*="item"]',
+                    'div[class*="offer"]'
                 ]
 
                 products_found = False
@@ -1153,7 +1194,32 @@ class AllegroEnhancedScraper:
 
                 if not products_found:
                     logger.warning(f"⚠️ На странице {page_num} товары не найдены")
-                    break  # Прекращаем парсинг следующих страниц
+                    # Пробуем альтернативный подход - ищем любые ссылки на товары
+                    try:
+                        all_links = page.locator('a[href*="/oferta/"]')
+                        link_count = await all_links.count()
+                        if link_count > 0:
+                            logger.info(f"🔍 Найдено {link_count} ссылок на товары, пробуем парсить...")
+                            page_products = []
+                            for i in range(min(link_count, 20)):
+                                try:
+                                    link = all_links.nth(i)
+                                    product_data = await self._extract_product_data_from_link(page, link, query)
+                                    if product_data:
+                                        page_products.append(product_data)
+                                except Exception as e:
+                                    logger.debug(f"Ошибка парсинга ссылки {i}: {e}")
+                                    continue
+                            
+                            if page_products:
+                                all_products.extend(page_products)
+                                logger.info(f"📄 Страница {page_num}: добавлено {len(page_products)} товаров через альтернативный метод")
+                                products_found = True
+                    except Exception as e:
+                        logger.debug(f"Альтернативный метод не сработал: {e}")
+                    
+                    if not products_found:
+                        break  # Прекращаем парсинг следующих страниц
 
                 # Задержка между страницами
                 if page_num < max_pages:
@@ -1164,6 +1230,62 @@ class AllegroEnhancedScraper:
                 break
 
         return all_products
+
+    async def _extract_product_data_from_link(self, page: Page, link_element, query: str) -> Optional[Dict[str, Any]]:
+        """Извлекает данные о товаре из ссылки"""
+        try:
+            # Получаем текст ссылки
+            title = await link_element.text_content()
+            if not title or not title.strip():
+                return None
+            
+            title = title.strip()
+            
+            # Получаем URL
+            url = await link_element.get_attribute('href')
+            if not url:
+                return None
+            
+            if not url.startswith('http'):
+                url = f"https://allegro.pl{url}"
+            
+            # Проверяем релевантность
+            relevance_score = self._calculate_relevance_score(title, query)
+            if relevance_score < 20.0:  # Сниженный порог для альтернативного метода
+                return None
+            
+            # Ищем цену в родительском элементе
+            price = ""
+            try:
+                parent = link_element.locator('xpath=..')
+                if await parent.count() > 0:
+                    parent_text = await parent.text_content()
+                    import re
+                    price_match = re.search(r'\d+[,.]?\d*\s*zł', parent_text)
+                    if price_match:
+                        price = price_match.group()
+            except:
+                pass
+            
+            if not price:
+                price = "Цена не указана"
+            
+            return {
+                'name': title,
+                'price': price,
+                'url': url,
+                'image': '',
+                'seller': 'Продавец не указан',
+                'availability': 'Информация о доставке недоступна',
+                'rating': 'Рейтинг не указан',
+                'description': f'Источник: Allegro (альтернативный метод), Поиск: {query}',
+                'relevance_score': relevance_score,
+                'source': 'Allegro'
+            }
+            
+        except Exception as e:
+            logger.debug(f"Ошибка извлечения данных из ссылки: {e}")
+            return None
 
     def _fallback_simple_search(self, query: str) -> List[Dict[str, Any]]:
         """Fallback метод через простые HTTP запросы с несколькими попытками"""
