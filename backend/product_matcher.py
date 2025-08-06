@@ -245,6 +245,42 @@ class ProductMatcher:
         
         return result
 
+    def process_file_in_memory(self, file_path: str) -> List[Dict]:
+        """
+        Обрабатывает весь файл и возвращает результаты в памяти без сохранения в файл
+        """
+        # Читаем файл
+        df = self.read_file(file_path)
+        self.total_count = len(df)
+        self.processed_count = 0
+        self.results = []
+
+        logger.info(f"🔍 Начинаем обработку {self.total_count} товаров в памяти")
+
+        # Обрабатываем каждую строку
+        for index, row in df.iterrows():
+            try:
+                result = self.search_single_product(row, index)
+                self.results.append(result)
+                self.processed_count += 1
+
+                logger.info(f"Обработано {self.processed_count}/{self.total_count} товаров")
+
+            except Exception as e:
+                logger.error(f"Ошибка обработки строки {index + 1}: {e}")
+                error_result = {
+                    'row_index': index + 1,
+                    'error': str(e),
+                    'amazon': [],
+                    'aliexpress': [],
+                    'allegro': []
+                }
+                self.results.append(error_result)
+                self.processed_count += 1
+
+        logger.info(f"Обработка завершена. Обработано {self.processed_count} товаров")
+        return self.results
+
     def process_file(self, file_path: str, output_file: str = None) -> List[Dict]:
         """
         Обрабатывает весь файл и возвращает результаты с принудительным обновлением

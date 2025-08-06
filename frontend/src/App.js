@@ -104,13 +104,13 @@ function App() {
   };
 
   const handleCsvUpload = async () => {
-
     setCsvUploading(true);
     setCsvUploadSuccess(false);
     setCsvUploadError(null);
     setCsvProductsCount(0);
-   // CsvResults(null);
+    setCsvResults(null);
     setCsvResultsError(null);
+    
     const fileInput = fileInputRef.current;
     if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
       setCsvUploadError('Please select a CSV file');
@@ -119,7 +119,6 @@ function App() {
     }
 
     const file = fileInput.files[0];
-
 
     const allowedExtensions = ['.csv', '.xlsx', '.xls'];
     const isValidFile = allowedExtensions.some(ext =>
@@ -141,12 +140,32 @@ function App() {
         headers: {
           'Content-Type': 'multipart/form-data'
         },
-        timeout: 30000
+        timeout: 300000 // 5 minutes timeout for processing
       });
 
-      setCsvUploadSuccess(true);
-      setCsvProductsCount(response.data.products_count || 0);
-      console.log('CSV upload successful:', response.data);
+      if (response.data.success) {
+        setCsvUploadSuccess(true);
+        setCsvProductsCount(response.data.products_count || 0);
+        
+        // Обрабатываем результаты - проверяем разные возможные структуры
+        let results = response.data.results || [];
+        
+        // Если результаты пришли в формате {results: [...]}, извлекаем их
+        if (results.results && Array.isArray(results.results)) {
+          results = results.results;
+        }
+        
+        // Если результаты пришли в формате {metadata: ..., results: [...]}, извлекаем их
+        if (results.metadata && results.results && Array.isArray(results.results)) {
+          results = results.results;
+        }
+        
+        setCsvResults(results);
+        console.log('CSV upload and processing successful:', response.data);
+        console.log('Processed results:', results);
+      } else {
+        setCsvUploadError(response.data.error || 'Failed to process CSV file');
+      }
     } catch (err) {
       console.error('Error uploading CSV:', err);
       if (err.response && err.response.data && err.response.data.error) {
@@ -188,7 +207,7 @@ function App() {
             <h2 className="text-xl font-semibold mb-3">Завантажити файл товарів</h2>
             <p className="text-sm text-gray-600 mb-4">
               Завантажте CSV або Excel файл з характеристиками товарів (назва, бренд, категорія, колір тощо)
-              для пошуку кількох товарів одночасно. Результати будуть збережені у файл results.json на сервері.
+              для пошуку кількох товарів одночасно. Результати будуть відображені нижче.
             </p>
 
             <div className="flex flex-col md:flex-row md:items-center md:space-x-4">
@@ -237,19 +256,7 @@ function App() {
 
             {csvUploadSuccess && (
               <div className="mt-3 p-3 bg-green-100 text-green-700 rounded-md text-sm">
-                Успішно завантажено CSV з {csvProductsCount} товарами.
-                Обробка у фоновому режимі. Результати будуть збережені у файл results.json на сервері.
-                <div className="mt-2">
-                  <button
-                    onClick={fetchCsvResults}
-                    disabled={csvResultsLoading}
-                    className="py-1 px-3 bg-green-600 text-white rounded-md hover:bg-green-700
-                      focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50
-                      disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                  >
-                    {csvResultsLoading ? 'Завантаження результатів...' : 'Переглянути результати'}
-                  </button>
-                </div>
+                Успішно оброблено CSV з {csvProductsCount} товарами. Результати відображені нижче.
               </div>
             )}
 
@@ -320,7 +327,7 @@ function App() {
                       <tr key={index} className={index % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
                         <td className="py-2 px-4 border-b border-gray-200 text-sm">
                           <div>
-                            <div className="font-medium">{result.query || result.product}</div>
+                            <div className="font-medium">{result.query || result.product || result.name || `Товар ${index + 1}`}</div>
                             {result.characteristics && (
                               <div className="text-xs text-gray-500 mt-1">
                                 {Object.entries(result.characteristics).map(([key, value]) => (
@@ -328,14 +335,17 @@ function App() {
                                 ))}
                               </div>
                             )}
+                            {result.row_index && (
+                              <div className="text-xs text-gray-400">Рядок: {result.row_index}</div>
+                            )}
                           </div>
                         </td>
                         <td className="py-2 px-4 border-b border-gray-200 text-sm">
                           {result.amazon && result.amazon.length > 0 ? (
                             <div>
-                              <div className="font-medium">{result.amazon[0].name}</div>
+                              <div className="font-medium">{result.amazon[0].name || result.amazon[0].title}</div>
                               <div className="text-green-600 font-semibold">{result.amazon[0].price}</div>
-                              <div className="text-xs text-gray-500">Score: {result.amazon[0].relevance_score?.toFixed(2)}</div>
+                              <div className="text-xs text-gray-500">Score: {result.amazon[0].relevance_score?.toFixed(2) || 'N/A'}</div>
                               <a href={result.amazon[0].url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline text-xs">
                                 Переглянути на Amazon
                               </a>
@@ -352,9 +362,9 @@ function App() {
                         <td className="py-2 px-4 border-b border-gray-200 text-sm">
                           {result.allegro && result.allegro.length > 0 ? (
                             <div>
-                              <div className="font-medium">{result.allegro[0].name}</div>
+                              <div className="font-medium">{result.allegro[0].name || result.allegro[0].title}</div>
                               <div className="text-green-600 font-semibold">{result.allegro[0].price}</div>
-                              <div className="text-xs text-gray-500">Score: {result.allegro[0].relevance_score?.toFixed(2)}</div>
+                              <div className="text-xs text-gray-500">Score: {result.allegro[0].relevance_score?.toFixed(2) || 'N/A'}</div>
                               <a href={result.allegro[0].url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline text-xs">
                                 Переглянути на Allegro
                               </a>
@@ -371,9 +381,9 @@ function App() {
                         <td className="py-2 px-4 border-b border-gray-200 text-sm">
                           {result.aliexpress && result.aliexpress.length > 0 ? (
                             <div>
-                              <div className="font-medium">{result.aliexpress[0].name}</div>
+                              <div className="font-medium">{result.aliexpress[0].name || result.aliexpress[0].title}</div>
                               <div className="text-green-600 font-semibold">{result.aliexpress[0].price}</div>
-                              <div className="text-xs text-gray-500">Score: {result.aliexpress[0].relevance_score?.toFixed(2)}</div>
+                              <div className="text-xs text-gray-500">Score: {result.aliexpress[0].relevance_score?.toFixed(2) || 'N/A'}</div>
                               <a href={result.aliexpress[0].url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline text-xs">
                                 Переглянути на AliExpress
                               </a>

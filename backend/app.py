@@ -522,17 +522,14 @@ def process_csv(df):
     """
     Process a DataFrame containing product characteristics.
     For each product, search on Amazon, Allegro, and AliExpress using enhanced matching.
-    Save results to results.json.
+    Returns results directly instead of saving to file.
 
     Args:
         df (pandas.DataFrame): DataFrame with product characteristics
+    Returns:
+        List[Dict]: Results of processing
     """
     try:
-        # Очищаем старые результаты для получения свежих данных
-        if os.path.exists('backend/results.json'):
-            os.remove('backend/results.json')
-            print("🗑️ Удален старый файл результатов для получения свежих данных")
-
         # Пытаемся использовать улучшенный ProductMatcher
         from product_matcher import ProductMatcher
 
@@ -540,30 +537,27 @@ def process_csv(df):
         temp_file = 'temp_upload.csv'
         df.to_csv(temp_file, index=False, encoding='utf-8')
 
-        # Используем ProductMatcher для обработки
+        # Используем ProductMatcher для обработки без сохранения в файл
         matcher = ProductMatcher()
-        results = matcher.process_file(temp_file, 'backend/results.json')
+        results = matcher.process_file_in_memory(temp_file)
 
         # Удаляем временный файл
         if os.path.exists(temp_file):
             os.remove(temp_file)
 
         print(f"Enhanced processing completed: {len(results)} products processed")
+        return results
 
     except Exception as e:
         print(f"Error in enhanced processing: {e}")
         # Fallback to simple processing
-        process_csv_simple(df)
+        return process_csv_simple(df)
 
 def process_csv_simple(df):
     """
     Простая обработка CSV файла (fallback)
+    Returns results directly instead of saving to file.
     """
-    # Очищаем старые результаты
-    if os.path.exists('backend/results.json'):
-        os.remove('backend/results.json')
-        print("🗑️ Удален старый файл результатов (fallback)")
-
     results = []
 
     # Determine which column to use for product names
@@ -575,7 +569,7 @@ def process_csv_simple(df):
 
     if not product_column:
         print("Не найдена колонка с названием товара")
-        return
+        return results
 
     for index, row in df.iterrows():
         product_name = row[product_column]
@@ -621,13 +615,8 @@ def process_csv_simple(df):
         # Sleep to avoid rate limiting
         time.sleep(1)
 
-    # Save results to backend/results.json
-    try:
-        with open('backend/results.json', 'w', encoding='utf-8') as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
-        print(f"Results saved to backend/results.json ({len(results)} products processed)")
-    except Exception as e:
-        print(f"Error saving results to file: {e}")
+    print(f"Simple processing completed: {len(results)} products processed")
+    return results
 
 @app.route('/api/upload-csv', methods=['POST'])
 def upload_csv():
@@ -642,10 +631,10 @@ def upload_csv():
     - size, размер (for sizes)
     - keywords, ключевые_слова (for additional keywords)
 
-    Processing is done in a background thread.
+    Processing is done immediately and results are returned directly.
 
     Returns:
-        JSON response indicating success or error
+        JSON response with results or error
     """
     # Check if file is present in the request
     if 'file' not in request.files:
@@ -682,16 +671,15 @@ def upload_csv():
         print(f"Available columns: {list(df.columns)}")
         print(f"Processing {len(df)} rows")
 
-        # Start background processing
-        thread = threading.Thread(target=process_csv, args=(df,))
-        thread.daemon = True
-        thread.start()
+        # Process the CSV file immediately
+        results = process_csv(df)
 
         return jsonify({
             'success': True,
-            'message': f'Processing {len(df)} products in the background',
-            'products_count': len(df),
-            'columns': list(df.columns)
+            'message': f'Successfully processed {len(results)} products',
+            'products_count': len(results),
+            'columns': list(df.columns),
+            'results': results
         })
 
     except Exception as e:
