@@ -33,7 +33,7 @@ function App() {
 
     try {
 
-      const response = await axios.post('http://127.0.0.1:5001/api/search', {
+      const response = await axios.post('http://localhost:5001/api/search', {
         query: query.trim()
       }, {
         headers: {
@@ -77,7 +77,7 @@ function App() {
     setCsvResults(null);
 
     try {
-      const response = await axios.get('http://127.0.0.1:5001/api/csv-results', {
+      const response = await axios.get('http://localhost:5001/api/csv-results', {
         timeout: 10000
       });
 
@@ -136,7 +136,7 @@ function App() {
     formData.append('file', file);
 
     try {
-      const response = await axios.post('http://127.0.0.1:5001/api/upload-csv', formData, {
+      const response = await axios.post('http://localhost:5001/api/upload-csv', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         },

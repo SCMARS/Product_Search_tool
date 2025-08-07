@@ -20,7 +20,7 @@ from aliexpress import search_aliexpress, search_aliexpress_api
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000"], supports_credentials=True, allow_headers=["Content-Type", "Authorization", "X-Requested-With"], methods=["GET", "POST", "OPTIONS", "DELETE"], expose_headers=["Content-Disposition"])
+CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000"], supports_credentials=True, allow_headers=["Content-Type", "Authorization", "X-Requested-With"], methods=["GET", "POST", "OPTIONS", "DELETE"], expose_headers=["Content-Disposition"])
 
 @app.route('/')
 def index():
