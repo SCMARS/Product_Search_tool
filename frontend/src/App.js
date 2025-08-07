@@ -144,8 +144,8 @@ function App() {
       });
 
       if (response.data.success) {
-        setCsvUploadSuccess(true);
-        setCsvProductsCount(response.data.products_count || 0);
+      setCsvUploadSuccess(true);
+      setCsvProductsCount(response.data.products_count || 0);
         
         // Обрабатываем результаты - проверяем разные возможные структуры
         let results = response.data.results || [];

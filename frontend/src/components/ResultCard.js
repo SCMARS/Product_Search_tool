@@ -212,14 +212,20 @@ const ResultCard = ({ product }) => {
         )}
 
         <div className="flex flex-col space-y-2">
-          <a 
-            href={product.url} 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="block w-full text-center bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium py-2 px-4 rounded transition-colors duration-200"
-          >
-            View Product
-          </a>
+          {product.url && product.url.trim() !== '' ? (
+            <a 
+              href={product.url} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="block w-full text-center bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium py-2 px-4 rounded transition-colors duration-200"
+            >
+              View Product
+            </a>
+          ) : (
+            <div className="block w-full text-center bg-gray-100 text-gray-400 font-medium py-2 px-4 rounded cursor-not-allowed">
+              No Link Available
+            </div>
+          )}
 
           <button
             onClick={copyDescription}

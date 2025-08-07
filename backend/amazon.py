@@ -107,7 +107,7 @@ def matches_query(product_name, query, min_score=30):
         if any(keyword in product_lower for keyword in phone_keywords):
             score += 40  # Бонус за смартфон
 
-    return score
+        return score
 
 def search_amazon(query, limit=10, max_pages=1):
     """
@@ -249,31 +249,84 @@ def search_amazon(query, limit=10, max_pages=1):
                     'img[data-old-hires]',
                     'img[src*="amazon"]',
                     'img.s-image'
-                ]
+                    ]
 
                 for img_selector in img_selectors:
                     img_elem = product.select_one(img_selector)
                     if img_elem:
                         image = img_elem.get('src') or img_elem.get('data-src') or img_elem.get('data-old-hires')
                         if image:
-                            break
+                                break
 
-                # Ссылка на товар
+                # Ссылка на товар - УЛУЧШЕННАЯ ЛОГИКА
                 link = ""
                 link_selectors = [
-                    'h2 a',
+                    'h2 a[href*="/dp/"]',
+                    'h2 a[href*="/gp/product/"]',
                     'a[href*="/dp/"]',
+                    'a[href*="/gp/product/"]',
                     'a[data-cy="title-recipe-link"]',
-                    'a[href*="/gp/product/"]'
+                    'h2 a',
+                    'a[data-asin]',
+                    'a[href*="amazon.de/dp/"]',
+                    'a[href*="amazon.de/gp/product/"]'
                 ]
 
                 for link_selector in link_selectors:
                     link_elem = product.select_one(link_selector)
                     if link_elem:
                         link = link_elem.get('href')
-                        if link and ('/dp/' in link or '/gp/product/' in link):
-                            if not link.startswith('http'):
-                                link = f"https://www.amazon.de{link}"
+                        if link:
+                            # Очищаем ссылку от лишних параметров
+                            if '/dp/' in link:
+                                # Извлекаем ASIN из ссылки
+                                asin_start = link.find('/dp/') + 4
+                                asin_end = link.find('/', asin_start)
+                                if asin_end == -1:
+                                    asin_end = link.find('?', asin_start)
+                                if asin_end == -1:
+                                    asin_end = len(link)
+                                
+                                asin = link[asin_start:asin_end]
+                                if len(asin) >= 10:  # ASIN обычно 10 символов
+                                    link = f"https://www.amazon.de/dp/{asin}"
+                                    break
+                            elif '/gp/product/' in link:
+                                # Извлекаем product ID
+                                product_start = link.find('/gp/product/') + 12
+                                product_end = link.find('/', product_start)
+                                if product_end == -1:
+                                    product_end = link.find('?', product_start)
+                                if product_end == -1:
+                                    product_end = len(link)
+                                
+                                product_id = link[product_start:product_end]
+                                if len(product_id) >= 10:
+                                    link = f"https://www.amazon.de/gp/product/{product_id}"
+                                    break
+                            else:
+                                # Если ссылка не содержит /dp/ или /gp/product/, но содержит amazon.de
+                                if 'amazon.de' in link:
+                                    if not link.startswith('http'):
+                                        link = f"https://www.amazon.de{link}"
+                                    break
+
+                # Если ссылка все еще не найдена, попробуем найти ASIN в data-asin атрибуте
+                if not link:
+                    asin = product.get('data-asin')
+                    if asin and len(asin) >= 10:
+                        link = f"https://www.amazon.de/dp/{asin}"
+                        logger.debug(f"🔗 Создана ссылка из ASIN: {link}")
+
+                # Если ссылка все еще пустая, попробуем найти любую ссылку в товаре
+                if not link:
+                    all_links = product.find_all('a', href=True)
+                    for a_tag in all_links:
+                        href = a_tag.get('href', '')
+                        if '/dp/' in href or '/gp/product/' in href:
+                            if not href.startswith('http'):
+                                href = f"https://www.amazon.de{href}"
+                            link = href
                             break
 
                 # Создаем результат - ВСЕ ТОВАРЫ БЕЗ ФИЛЬТРА
@@ -286,16 +339,22 @@ def search_amazon(query, limit=10, max_pages=1):
                     'source': 'Amazon'
                 }
 
+                # Логируем информацию о ссылке для отладки
+                if not link or link.strip() == '':
+                    logger.warning(f"⚠️ Товар без ссылки: {title[:50]}...")
+                else:
+                    logger.debug(f"🔗 Ссылка найдена: {link[:50]}...")
+
                 results.append(result)
                 logger.info(f"✅ Добавлен товар: {title[:50]}... (score: {relevance_score})")
 
             except Exception as e:
                 logger.error(f"Error processing product {i}: {e}")
                 continue
-
+    
         logger.info(f"🎯 Найдено {len(results)} товаров на Amazon (ВСЕ НАЙДЕННЫЕ)")
         return results
 
     except Exception as e:
         logger.error(f"Error searching Amazon: {e}")
-        return results
+    return results
