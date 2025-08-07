@@ -106,7 +106,7 @@ try {
     # Start Flask server in the background
     Write-Host "Starting Flask server..." -ForegroundColor Cyan
     $env:FLASK_APP = "app.py"
-    $flaskProcess = Start-Process -FilePath $PYTHON_CMD -ArgumentList "-m", "flask", "run", "--port=5001" -PassThru -WindowStyle Hidden
+    $flaskProcess = Start-Process -FilePath $PYTHON_CMD -ArgumentList "app.py" -PassThru -WindowStyle Hidden
     
     if (-not $flaskProcess) {
         Write-Host "Error: Failed to start Flask server." -ForegroundColor Red
