@@ -109,7 +109,7 @@ def matches_query(product_name, query, min_score=30):
 
         return score
 
-def search_amazon(query, limit=10, max_pages=1):
+def search_amazon(query, limit=50, max_pages=1):
     """
     Поиск товаров на Amazon.de - ВСЕ НАЙДЕННЫЕ ТОВАРЫ
     """
@@ -338,6 +338,10 @@ def search_amazon(query, limit=10, max_pages=1):
                     'relevance_score': relevance_score,
                     'source': 'Amazon'
                 }
+
+                # Добавляем ВСЕ товары без фильтрации по релевантности
+                results.append(result)
+                logger.info(f"✅ Добавлен товар: {title[:50]}... (score: {relevance_score})")
 
                 # Логируем информацию о ссылке для отладки
                 if not link or link.strip() == '':
