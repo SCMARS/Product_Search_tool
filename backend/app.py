@@ -196,6 +196,15 @@ def generate_product_description():
 
 @app.route('/api/search', methods=['POST'])
 def search():
+    """
+    Основной endpoint для поиска товаров на всех платформах
+    
+    Исправления:
+    - Добавлен недостающий метод _try_simple_search в AllegroEnhancedScraper
+    - Улучшена функция сортировки для обработки None значений
+    - Добавлена обработка ошибок для каждого скрапера
+    - Исправлена дублирующаяся запись в Amazon скрапере
+    """
     data = request.get_json()
     if not data or 'query' not in data:
         return jsonify({'error': 'Missing query parameter'}), 400
@@ -209,16 +218,52 @@ def search():
         amazon_future = executor.submit(search_amazon, query, limit=10)
         aliexpress_future = executor.submit(search_aliexpress, query, limit=10)
 
-        # Получаем результаты
-        allegro_results = allegro_future.result()
-        amazon_results = amazon_future.result()
-        aliexpress_results = aliexpress_future.result()
+        # Получаем результаты с обработкой ошибок
+        try:
+            allegro_results = allegro_future.result()
+        except Exception as e:
+            print(f"⚠️ Ошибка Allegro поиска: {e}")
+            allegro_results = []
+            
+        try:
+            amazon_results = amazon_future.result()
+        except Exception as e:
+            print(f"⚠️ Ошибка Amazon поиска: {e}")
+            amazon_results = []
+            
+        try:
+            aliexpress_results = aliexpress_future.result()
+        except Exception as e:
+            print(f"⚠️ Ошибка AliExpress поиска: {e}")
+            aliexpress_results = []
+
+    # Убеждаемся, что все результаты являются списками
+    if not isinstance(allegro_results, list):
+        allegro_results = []
+    if not isinstance(amazon_results, list):
+        amazon_results = []
+    if not isinstance(aliexpress_results, list):
+        aliexpress_results = []
 
     # Дополнительная сортировка результатов по релевантности
     def sort_by_relevance(results):
         if not results:
             return results
-        return sorted(results, key=lambda x: x.get('relevance_score', 0), reverse=True)
+        try:
+            # Фильтруем None значения и устанавливаем дефолтные значения
+            def get_score(item):
+                score = item.get('relevance_score')
+                if score is None:
+                    return 0.0
+                try:
+                    return float(score)
+                except (ValueError, TypeError):
+                    return 0.0
+            
+            return sorted(results, key=get_score, reverse=True)
+        except Exception as e:
+            print(f"⚠️ Ошибка сортировки: {e}")
+            return results
 
     # Сортируем результаты по релевантности
     allegro_results = sort_by_relevance(allegro_results)

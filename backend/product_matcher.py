@@ -13,7 +13,7 @@ from datetime import datetime
 # Импортируем наши модули поиска
 from amazon import search_amazon
 from aliexpress import search_aliexpress
-from allegro import search_allegro_improved
+from allegro_enhanced import search_allegro_enhanced_sync as search_allegro_improved
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)

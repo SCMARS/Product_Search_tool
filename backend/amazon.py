@@ -108,6 +108,9 @@ def matches_query(product_name, query, min_score=30):
             score += 40  # Бонус за смартфон
 
         return score
+    
+    # Возвращаем финальный счет для всех остальных случаев
+    return score
 
 def search_amazon(query, limit=50, max_pages=1):
     """
@@ -220,6 +223,12 @@ def search_amazon(query, limit=50, max_pages=1):
 
                 # УБИРАЕМ ФИЛЬТР РЕЛЕВАНТНОСТИ - ВОЗВРАЩАЕМ ВСЕ ТОВАРЫ
                 relevance_score = matches_query(title, query)  # Только для информации
+                
+                # Убеждаемся, что relevance_score всегда число
+                if relevance_score is None:
+                    relevance_score = 0
+                else:
+                    relevance_score = float(relevance_score)
 
                 # Цена - улучшенный парсинг
                 price = "Цена не указана"
@@ -348,9 +357,6 @@ def search_amazon(query, limit=50, max_pages=1):
                     logger.warning(f"⚠️ Товар без ссылки: {title[:50]}...")
                 else:
                     logger.debug(f"🔗 Ссылка найдена: {link[:50]}...")
-
-                results.append(result)
-                logger.info(f"✅ Добавлен товар: {title[:50]}... (score: {relevance_score})")
 
             except Exception as e:
                 logger.error(f"Error processing product {i}: {e}")

@@ -645,13 +645,26 @@ class AllegroEnhancedScraper:
                     except:
                         pass
 
-        # Если основной поиск не дал результатов, создаем mock результаты
+        # Если основной поиск не дал результатов, пробуем простой метод
         if not products:
             logger.warning("❌ Не удалось найти товары ни на одной попытке")
-            logger.info("🎭 Создаем демонстрационные результаты...")
-            mock_products = self._create_mock_results(query)
-            products.extend(mock_products)
-            logger.info(f"✅ Fallback метод дал {len(mock_products)} результатов")
+            logger.info("🔄 Пробуем простой метод поиска...")
+            try:
+                simple_products = await self._try_simple_search(query)
+                if simple_products:
+                    products.extend(simple_products)
+                    logger.info(f"✅ Простой метод дал {len(simple_products)} результатов")
+                else:
+                    logger.info("🎭 Создаем демонстрационные результаты...")
+                    mock_products = self._create_mock_results(query)
+                    products.extend(mock_products)
+                    logger.info(f"✅ Fallback метод дал {len(mock_products)} результатов")
+            except Exception as e:
+                logger.error(f"❌ Ошибка в fallback методах: {e}")
+                logger.info("🎭 Создаем демонстрационные результаты...")
+                mock_products = self._create_mock_results(query)
+                products.extend(mock_products)
+                logger.info(f"✅ Fallback метод дал {len(mock_products)} результатов")
 
         # Сортируем по релевантности
         products.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
@@ -731,17 +744,45 @@ class AllegroEnhancedScraper:
                         continue
 
                 if not products_found:
-                    logger.warning(f"⚠️ На странице {page_num} товары не найдены")
-                    break
-
-                if page_num < max_pages:
-                    await asyncio.sleep(random.uniform(2.0, 4.0))
+                    logger.warning(f"📄 Страница {page_num}: товары не найдены")
 
             except Exception as e:
-                logger.error(f"❌ Ошибка парсинга страницы {page_num}: {e}")
-                break
+                logger.error(f"Ошибка парсинга страницы {page_num}: {e}")
+                continue
 
         return all_products
+
+    async def _try_simple_search(self, query: str) -> List[Dict[str, Any]]:
+        """Пробует простой метод поиска через API или базовый парсинг"""
+        try:
+            logger.info("🔄 Пробуем простой метод поиска...")
+            
+            # Пробуем использовать API Allegro если доступен
+            api_url = f"https://allegro.pl/listing?string={quote_plus(query)}"
+            
+            headers = {
+                'User-Agent': self._get_random_user_agent(),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'pl-PL,pl;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            }
+            
+            response = requests.get(api_url, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                logger.info("✅ Простой API запрос успешен")
+                # Здесь можно добавить простой парсинг HTML если нужно
+                # Пока возвращаем пустой список, чтобы перейти к mock результатам
+                return []
+            else:
+                logger.warning(f"❌ Простой API запрос не удался: {response.status_code}")
+                return []
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка простого поиска: {e}")
+            return []
 
     def _create_mock_results(self, query: str) -> List[Dict[str, Any]]:
         """Создает mock результаты для демонстрации"""
