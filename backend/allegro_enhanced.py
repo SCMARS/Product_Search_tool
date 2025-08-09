@@ -667,7 +667,11 @@ class AllegroEnhancedScraper:
                 logger.info(f"✅ Fallback метод дал {len(mock_products)} результатов")
 
         # Сортируем по релевантности
-        products.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
+        try:
+            products.sort(key=lambda x: float(x.get('relevance_score', 0) or 0), reverse=True)
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка сортировки: {e}")
+            # Если сортировка не удалась, оставляем как есть
         
         logger.info(f"✅ Allegro поиск завершен: {len(products)} товаров")
         return products

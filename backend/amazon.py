@@ -14,7 +14,7 @@ def matches_query(product_name, query, min_score=30):
     Улучшенная функция проверки релевантности товара
     """
     if not product_name or not query:
-        return False
+        return 0.0
 
     product_lower = product_name.lower()
     query_lower = query.lower()
@@ -90,7 +90,7 @@ def matches_query(product_name, query, min_score=30):
     # Только для iPhone запросов применяем фильтр аксессуаров
     if 'iphone' in query_lower and any(keyword in product_lower for keyword in accessory_strict_keywords):
         # Если товар содержит слова аксессуаров, то он НЕ является смартфоном
-        return 0  # Полностью исключаем из результатов
+        return 0.0  # Полностью исключаем из результатов
 
     # Специальные правила для iPhone
     if 'iphone' in query_lower:
@@ -107,10 +107,10 @@ def matches_query(product_name, query, min_score=30):
         if any(keyword in product_lower for keyword in phone_keywords):
             score += 40  # Бонус за смартфон
 
-        return score
+        return float(score)
     
     # Возвращаем финальный счет для всех остальных случаев
-    return score
+    return float(score)
 
 def search_amazon(query, limit=50, max_pages=1):
     """
