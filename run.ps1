@@ -26,16 +26,18 @@ $null = Register-EngineEvent PowerShell.Exiting -Action {
 }
 
 # Check for required commands
-# Check for Python (either python or python3)
-$PYTHON_CMD = "python"
-if (-not (Test-CommandExists $PYTHON_CMD)) {
-    if (Test-CommandExists "python3") {
-        $PYTHON_CMD = "python3"
-    } else {
-        Write-Host "Error: Python is not installed. Please install Python 3.8 or higher." -ForegroundColor Red
-        Write-Host "Download from: https://www.python.org/downloads/" -ForegroundColor Yellow
-        exit 1
-    }
+# Determine Python launcher (python, python3, or py -3)
+$PYTHON_LAUNCH = @()
+if (Test-CommandExists "python") {
+    $PYTHON_LAUNCH = @("python")
+} elseif (Test-CommandExists "python3") {
+    $PYTHON_LAUNCH = @("python3")
+} elseif (Test-CommandExists "py") {
+    $PYTHON_LAUNCH = @("py", "-3")
+} else {
+    Write-Host "Error: Python is not installed. Please install Python 3.8 or higher." -ForegroundColor Red
+    Write-Host "Download from: https://www.python.org/downloads/" -ForegroundColor Yellow
+    exit 1
 }
 
 if (-not (Test-CommandExists "npm")) {
@@ -60,7 +62,7 @@ try {
     # Create virtual environment if it doesn't exist
     if (-not (Test-Path -Path "venv")) {
         Write-Host "Creating virtual environment..." -ForegroundColor Cyan
-        & $PYTHON_CMD -m venv venv
+        & $PYTHON_LAUNCH -m venv venv
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Error: Failed to create virtual environment." -ForegroundColor Red
             exit 1
@@ -80,6 +82,10 @@ try {
         Write-Host "Error: Failed to activate virtual environment. Activation script not found at $activateScript" -ForegroundColor Red
         exit 1
     }
+
+    # Install dependencies (ensure tooling is up to date)
+    Write-Host "Upgrading pip/setuptools/wheel..." -ForegroundColor Cyan
+    python -m pip install -U pip setuptools wheel | Out-Null
 
     # Install dependencies
     Write-Host "Installing backend dependencies..." -ForegroundColor Cyan
@@ -108,7 +114,7 @@ try {
 
     # Wait for backend to start
     Write-Host "Waiting for backend to start..." -ForegroundColor Cyan
-    Start-Sleep -Seconds 8
+    Start-Sleep -Seconds 10
 
     # Check if backend is running
     Write-Host "Checking if backend is running..." -ForegroundColor Cyan
@@ -150,13 +156,13 @@ try {
     Set-Location -Path $originalLocation
 
     # Success message
-    Write-Host ""
+    Write-Host "" 
     Write-Host "=== Application is running! ===" -ForegroundColor Green
     Write-Host "- Backend API: http://localhost:5003" -ForegroundColor Cyan
     Write-Host "- Frontend: http://localhost:3000" -ForegroundColor Cyan
-    Write-Host ""
+    Write-Host "" 
     Write-Host "Open http://localhost:3000 in your browser" -ForegroundColor Yellow
-    Write-Host ""
+    Write-Host "" 
     Write-Host "Press Ctrl+C to stop the application..." -ForegroundColor Yellow
 
     # Keep the script running
