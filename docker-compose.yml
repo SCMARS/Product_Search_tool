@@ -12,6 +12,7 @@ services:
     environment:
       - FLASK_ENV=production
       - PYTHONUNBUFFERED=1
+      - PORT=5003
       - CAPTCHA_API_KEY=${CAPTCHA_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - RAPIDAPI_KEY=${RAPIDAPI_KEY}

@@ -37,7 +37,7 @@ sleep 10
 
 echo ""
 echo "=== Application is running! ==="
-echo "Backend: http://localhost:5001"
+echo "Backend: http://localhost:5003"
 echo "Frontend: http://localhost:3000"
 echo ""
 echo "Open http://localhost:3000 in your browser"

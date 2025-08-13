@@ -78,7 +78,7 @@ REACT_PID=$!
 # Wait for user to press Ctrl+C
 echo
 echo "✅ Приложение запущено!"
-echo "- Backend: http://localhost:5001"
+echo "- Backend: http://localhost:5003"
 echo "- Frontend: http://localhost:3000"
 echo
 echo "Нажмите Ctrl+C для остановки приложения"

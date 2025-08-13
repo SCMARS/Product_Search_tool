@@ -24,7 +24,7 @@ up: ## Запустить в режиме разработки
 	docker-compose -f $(COMPOSE_FILE_DEV) up -d
 	@echo "✅ Сервисы запущены:"
 	@echo "   Frontend: http://localhost"
-	@echo "   Backend: http://localhost:5001"
+	@echo "   Backend: http://localhost:5003"
 
 prod: ## Запустить в режиме продакшена
 	@echo "🏭 Запускаем в режиме продакшена..."
@@ -63,7 +63,7 @@ status: ## Показать статус сервисов
 
 health: ## Проверить health check
 	@echo "🏥 Проверяем health check..."
-	@curl -f http://localhost:5001/health && echo "✅ Backend здоров" || echo "❌ Backend не отвечает"
+	@curl -f http://localhost:5003/health && echo "✅ Backend здоров" || echo "❌ Backend не отвечает"
 	@curl -f http://localhost/ > /dev/null 2>&1 && echo "✅ Frontend здоров" || echo "❌ Frontend не отвечает"
 
 clean: ## Очистить все Docker ресурсы

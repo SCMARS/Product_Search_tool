@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import concurrent.futures
@@ -20,7 +21,7 @@ from aliexpress import search_aliexpress, search_aliexpress_api
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000"], supports_credentials=True, allow_headers=["Content-Type", "Authorization", "X-Requested-With"], methods=["GET", "POST", "OPTIONS", "DELETE"], expose_headers=["Content-Disposition"])
+CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:80", "http://127.0.0.1:80", "http://frontend:80"], supports_credentials=True, allow_headers=["Content-Type", "Authorization", "X-Requested-With"], methods=["GET", "POST", "OPTIONS", "DELETE"], expose_headers=["Content-Disposition"])
 
 @app.route('/')
 def index():
@@ -231,6 +232,11 @@ def search():
             print(f"⚠️ Ошибка Amazon поиска: {e}")
             amazon_results = []
             
+        # Если Amazon недоступен, добавляем информационное сообщение
+        if not amazon_results:
+            print("ℹ️ Amazon может быть временно недоступен (ошибка 503) или заблокирован")
+            print("💡 Результаты будут показаны только с Allegro и AliExpress")
+            
         try:
             aliexpress_results = aliexpress_future.result()
         except Exception as e:
@@ -270,11 +276,17 @@ def search():
     amazon_results = sort_by_relevance(amazon_results)
     aliexpress_results = sort_by_relevance(aliexpress_results)
 
-    # Формируем ответ
+    # Формируем ответ с информацией о статусе сервисов
     response_data = {
         'allegro': allegro_results,
         'amazon': amazon_results,
-        'aliexpress': aliexpress_results
+        'aliexpress': aliexpress_results,
+        'status': {
+            'allegro': 'success' if allegro_results else 'no_results',
+            'amazon': 'success' if amazon_results else 'unavailable',
+            'aliexpress': 'success' if aliexpress_results else 'no_results'
+        },
+        'message': 'Amazon может быть временно недоступен' if not amazon_results else None
     }
 
     print(f"Total response: Allegro={len(allegro_results)}, Amazon={len(amazon_results)}, AliExpress={len(aliexpress_results)}")
@@ -739,15 +751,16 @@ def get_csv_results():
         JSON response containing the results from results.json
     """
     try:
-        # Check if results.json exists
-        if not os.path.exists('backend/results.json'):
+        # Check if results.json exists in current directory
+        results_file = os.path.join(os.getcwd(), 'results.json')
+        if not os.path.exists(results_file):
             return jsonify({
                 'success': False,
                 'message': 'No results available. Please upload a CSV file first.'
             }), 404
 
         # Read the results.json file
-        with open('backend/results.json', 'r', encoding='utf-8') as f:
+        with open(results_file, 'r', encoding='utf-8') as f:
             results = json.load(f)
 
         return jsonify({
@@ -767,7 +780,7 @@ def list_files():
     try:
         uploads_dir = os.path.join(os.getcwd(), 'uploads')
         if not os.path.exists(uploads_dir):
-            os.makedirs(uploads_dir)
+            os.makedirs(uploads_dir, exist_ok=True)
 
         files = []
         for filename in os.listdir(uploads_dir):
@@ -796,6 +809,9 @@ def delete_file(filename):
     """Delete a specific file"""
     try:
         uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        if not os.path.exists(uploads_dir):
+            os.makedirs(uploads_dir, exist_ok=True)
+            
         filepath = os.path.join(uploads_dir, filename)
 
         if os.path.exists(filepath):
@@ -820,6 +836,9 @@ def download_file(filename):
     """Download a specific file"""
     try:
         uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        if not os.path.exists(uploads_dir):
+            os.makedirs(uploads_dir, exist_ok=True)
+            
         filepath = os.path.join(uploads_dir, filename)
 
         if os.path.exists(filepath):
@@ -887,4 +906,5 @@ if __name__ == '__main__':
     # Определяем режим запуска
     debug_mode = os.getenv('FLASK_ENV') != 'production'
     host = '0.0.0.0' if os.getenv('FLASK_ENV') == 'production' else '127.0.0.1'
-    app.run(debug=debug_mode, host=host, port=5001)
+    port = int(os.getenv('PORT', 5003))
+    app.run(debug=debug_mode, host=host, port=port)

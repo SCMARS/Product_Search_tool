@@ -112,16 +112,57 @@ def matches_query(product_name, query, min_score=30):
     # Возвращаем финальный счет для всех остальных случаев
     return float(score)
 
+def get_current_ip():
+    """Получаем текущий IP адрес"""
+    try:
+        response = requests.get('https://ipinfo.io/ip', timeout=5)
+        return response.text.strip()
+    except:
+        return None
+
 def search_amazon(query, limit=50, max_pages=1):
     """
-    Поиск товаров на Amazon.de - ВСЕ НАЙДЕННЫЕ ТОВАРЫ
+    Поиск товаров на Amazon - автоматически выбирает .de или .com в зависимости от IP
     """
     results = []
     
     try:
+        # Проверяем текущий IP
+        current_ip = get_current_ip()
+        logger.info(f"🌐 Текущий IP: {current_ip}")
+        
+        # Выбираем домен Amazon в зависимости от IP
+        if current_ip and any(country in current_ip for country in ['185.199', '185.200', '185.201', '185.202']):
+            # Немецкий IP - используем amazon.de
+            amazon_domain = "amazon.de"
+            logger.info("🇩🇪 Используем Amazon.de (немецкий IP)")
+        else:
+            # Другой IP - пробуем amazon.com
+            amazon_domain = "amazon.com"
+            logger.info("🇺🇸 Используем Amazon.com (международный IP)")
+        
+        # Обновляем заголовки для выбранного домена
+        if amazon_domain == "amazon.com":
+            accept_language = 'en-US,en;q=0.9'
+            referer = 'https://www.amazon.com/'
+        else:
+            accept_language = 'de-DE,de;q=0.9,en;q=0.8,en-US;q=0.7'
+            referer = 'https://www.amazon.de/'
+        # Динамические заголовки для обхода блокировки
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0'
+        ]
+        
+        # Случайный User-Agent для каждой попытки
+        import random
+        user_agent = random.choice(user_agents)
+        
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8',
+            'User-Agent': user_agent,
+            'Accept-Language': accept_language,
             'Accept-Encoding': 'gzip, deflate, br',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Connection': 'keep-alive',
@@ -133,7 +174,7 @@ def search_amazon(query, limit=50, max_pages=1):
             'Sec-Fetch-Site': 'none',
             'Sec-Fetch-User': '?1',
             'DNT': '1',
-            'Referer': 'https://www.amazon.de/'
+            'Referer': referer
         }
         
         # ТОЛЬКО ПЕРВАЯ СТРАНИЦА
@@ -147,12 +188,47 @@ def search_amazon(query, limit=50, max_pages=1):
         # Добавляем задержку перед запросом
         time.sleep(2)
         
-        response = requests.get(url, headers=headers, timeout=20)
+        # Попытка с retry для ошибки 503
+        max_retries = 3
+        retry_delay = 5
         
-        logger.info(f"📡 Amazon response status: {response.status_code}")
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(url, headers=headers, timeout=20)
+                
+                if response.status_code == 503 and attempt < max_retries - 1:
+                    logger.info(f"🔄 Попытка {attempt + 1}/{max_retries}: Amazon недоступен, ждем {retry_delay} сек...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Увеличиваем задержку с каждой попыткой
+                    continue
+                else:
+                    break  # Выходим из цикла retry
+                    
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"🔄 Попытка {attempt + 1}/{max_retries}: Ошибка сети, ждем {retry_delay} сек...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                else:
+                    logger.error(f"❌ Все попытки исчерпаны: {e}")
+                    return results
+        
+        logger.info(f"📡 Amazon response status: {response.status_code} (попытка {attempt + 1})")
         
         if response.status_code != 200:
-            logger.error(f"❌ Amazon вернул ошибку {response.status_code}")
+            if response.status_code == 503:
+                logger.warning(f"⚠️ Amazon временно недоступен (503) - сервер перегружен или блокирует запросы")
+                logger.info("💡 Попробуйте позже или используйте другие источники (AliExpress, Allegro)")
+            elif response.status_code == 429:
+                logger.warning(f"⚠️ Amazon ограничивает запросы (429) - слишком много запросов")
+                logger.info("💡 Добавьте задержку между запросами")
+            elif response.status_code == 403:
+                logger.warning(f"⚠️ Amazon блокирует доступ (403) - возможно, геоблокировка")
+                logger.info("💡 Попробуйте использовать VPN или прокси")
+            else:
+                logger.error(f"❌ Amazon вернул ошибку {response.status_code}")
+            
             return results
 
         soup = BeautifulSoup(response.content, 'html.parser')

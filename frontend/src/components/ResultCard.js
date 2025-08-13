@@ -41,7 +41,7 @@ const ResultCard = ({ product }) => {
     const productName = product.name;
 
     try {
-      const response = await axios.post('http://127.0.0.1:5001/api/generate-image', {
+      const response = await axios.post('http://localhost:5003/api/generate-image', {
         description: productName
       }, {
         headers: {
@@ -101,7 +101,7 @@ const ResultCard = ({ product }) => {
     setDescriptionError(null);
 
     try {
-      const response = await axios.post('http://127.0.0.1:5001/api/generate-product-description', {
+      const response = await axios.post('http://localhost:5003/api/generate-product-description', {
         name: product.name,
         price: product.price,
         url: product.url,

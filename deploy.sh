@@ -71,7 +71,7 @@ docker-compose -f $COMPOSE_FILE ps
 
 # Проверяем health check
 echo "🏥 Проверяем health check..."
-if curl -f http://localhost:5001/health > /dev/null 2>&1; then
+if curl -f http://localhost:5003/health > /dev/null 2>&1; then
     echo "✅ Backend запущен успешно"
 else
     echo "❌ Backend не отвечает"
@@ -88,8 +88,8 @@ echo "🎉 Деплой завершен!"
 echo ""
 echo "📱 Доступные сервисы:"
 echo "   Frontend: http://localhost"
-echo "   Backend API: http://localhost:5001"
-echo "   Health Check: http://localhost:5001/health"
+echo "   Backend API: http://localhost:5003"
+echo "   Health Check: http://localhost:5003/health"
 echo ""
 echo "📋 Полезные команды:"
 echo "   Просмотр логов: docker-compose -f $COMPOSE_FILE logs -f"

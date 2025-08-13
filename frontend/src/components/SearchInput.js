@@ -25,7 +25,7 @@ const SearchInput = ({ query, setQuery, loading }) => {
 
       try {
         // Send the image to the backend for analysis
-        const response = await axios.post('http://127.0.0.1:5001/api/analyze-image', formData, {
+        const response = await axios.post('http://localhost:5003/api/analyze-image', formData, {
           headers: {
             'Content-Type': 'multipart/form-data'
           }

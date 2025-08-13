@@ -33,7 +33,7 @@ function App() {
 
     try {
 
-      const response = await axios.post('http://localhost:5001/api/search', {
+      const response = await axios.post('http://localhost:5003/api/search', {
         query: query.trim()
       }, {
         headers: {
@@ -46,7 +46,7 @@ function App() {
     } catch (err) {
       console.error('Error searching products:', err);
       if (err.code === 'ECONNREFUSED') {
-        setError('Cannot connect to server. Make sure Flask server is running on port 5001.');
+        setError('Cannot connect to server. Make sure Flask server is running on port 5003.');
       } else if (err.code === 'ERR_NETWORK') {
         setError('Network error. Check CORS configuration on server.');
       } else {
@@ -77,7 +77,7 @@ function App() {
     setCsvResults(null);
 
     try {
-      const response = await axios.get('http://localhost:5001/api/csv-results', {
+      const response = await axios.get('http://localhost:5003/api/csv-results', {
         timeout: 10000
       });
 
@@ -94,7 +94,7 @@ function App() {
       if (err.response && err.response.status === 404) {
         setCsvResultsError('No results available. Please upload a CSV file first.');
       } else if (err.code === 'ECONNREFUSED') {
-        setCsvResultsError('Cannot connect to server. Make sure Flask server is running on port 5001.');
+        setCsvResultsError('Cannot connect to server. Make sure Flask server is running on port 5003.');
       } else {
         setCsvResultsError('Failed to fetch CSV results. Please try again later.');
       }
@@ -136,7 +136,7 @@ function App() {
     formData.append('file', file);
 
     try {
-      const response = await axios.post('http://localhost:5001/api/upload-csv', formData, {
+      const response = await axios.post('http://localhost:5003/api/upload-csv', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         },
@@ -171,7 +171,7 @@ function App() {
       if (err.response && err.response.data && err.response.data.error) {
         setCsvUploadError(err.response.data.error);
       } else if (err.code === 'ECONNREFUSED') {
-        setCsvUploadError('Cannot connect to server. Make sure Flask server is running on port 5001.');
+        setCsvUploadError('Cannot connect to server. Make sure Flask server is running on port 5003.');
       } else {
         setCsvUploadError('Failed to upload CSV. Please try again later.');
       }
@@ -427,6 +427,43 @@ function App() {
               <div className="mt-8">
                 <h2 className="text-2xl font-semibold mb-4">Результати пошуку для "{query}"</h2>
 
+                {/* Статус сервисов */}
+                {results.status && (
+                  <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                    <h3 className="text-lg font-medium mb-3">Статус сервисів:</h3>
+                    <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div className="flex items-center">
+                        <span className={`w-3 h-3 rounded-full mr-2 ${results.status.amazon === 'success' ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                        <span className="font-medium">Amazon:</span>
+                        <span className={`ml-2 ${results.status.amazon === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                          {results.status.amazon === 'success' ? 'Доступний' : 'Недоступний'}
+                        </span>
+                      </div>
+                      <div className="flex items-center">
+                        <span className={`w-3 h-3 rounded-full mr-2 ${results.status.allegro === 'success' ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                        <span className="font-medium">Allegro:</span>
+                        <span className={`ml-2 ${results.status.allegro === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                          {results.status.allegro === 'success' ? 'Доступний' : 'Немає результатів'}
+                        </span>
+                      </div>
+                      <div className="flex items-center">
+                        <span className={`w-3 h-3 rounded-full mr-2 ${results.status.aliexpress === 'success' ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                        <span className="font-medium">AliExpress:</span>
+                        <span className={`ml-2 ${results.status.aliexpress === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                          {results.status.aliexpress === 'success' ? 'Доступний' : 'Немає результатів'}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    {/* Сообщение о недоступности Amazon */}
+                    {results.message && (
+                      <div className="mt-3 p-3 bg-yellow-100 text-yellow-700 rounded-md text-sm">
+                        ⚠️ {results.message}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div>
                     <h3 className="text-xl font-medium mb-3 text-orange-500">Amazon</h3>
@@ -435,7 +472,11 @@ function App() {
                             <ResultCard key={`amazon-${index}`} product={product} />
                         ))
                     ) : (
-                        <p className="text-gray-500">No products found on Amazon</p>
+                        <div className="text-center p-4">
+                          <p className="text-gray-500 mb-2">Amazon недоступен</p>
+                          <p className="text-xs text-gray-400">Сервер перегружен или блокирует запросы</p>
+                          <p className="text-xs text-gray-400">Спробуйте пізніше</p>
+                        </div>
                     )}
                   </div>
 

@@ -220,7 +220,7 @@ class AllegroEnhancedScraper:
                             logger.warning("⚠️ Не удалось получить правильное изображение CAPTCHA")
                             return False
                     except ImportError:
-                        logger.error("❌ Модуль 2captcha не установлен")
+                        logger.error("❌ Модуль 2captcha не установлен. Установите: pip install 2captcha-python")
                         return False
                     except Exception as e:
                         logger.error(f"❌ Ошибка решения CAPTCHA: {e}")

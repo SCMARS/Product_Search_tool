@@ -12,7 +12,7 @@ function Stop-BackgroundProcesses {
     Write-Host "Stopping background processes..."
     
     # Stop Flask processes
-    Get-Process -Name "python" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*flask*" } | Stop-Process -Force
+    Get-Process -Name "python" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*flask*" -or $_.CommandLine -like "*app.py*" } | Stop-Process -Force
     
     # Stop Node.js processes
     Get-Process -Name "node" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*npm*start*" } | Stop-Process -Force
@@ -32,7 +32,7 @@ if (-not (Test-CommandExists $PYTHON_CMD)) {
     if (Test-CommandExists "python3") {
         $PYTHON_CMD = "python3"
     } else {
-        Write-Host "Error: Python is not installed. Please install Python 3.6 or higher." -ForegroundColor Red
+        Write-Host "Error: Python is not installed. Please install Python 3.8 or higher." -ForegroundColor Red
         Write-Host "Download from: https://www.python.org/downloads/" -ForegroundColor Yellow
         exit 1
     }
@@ -85,8 +85,7 @@ try {
     Write-Host "Installing backend dependencies..." -ForegroundColor Cyan
     pip install -r requirements.txt
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "Error: Failed to install backend dependencies." -ForegroundColor Red
-        exit 1
+        Write-Host "Warning: Some dependencies may not have installed correctly." -ForegroundColor Yellow
     }
 
     # Install Playwright browsers
@@ -98,50 +97,38 @@ try {
 
     # Check if .env file exists, if not create from example
     if (-not (Test-Path ".env") -and (Test-Path ".env.example")) {
-        Write-Host "Creating .env file from .env.example..." -ForegroundColor Cyan
+        Write-Host "Creating .env file from example..." -ForegroundColor Cyan
         Copy-Item ".env.example" ".env"
-        Write-Host "Please edit .env file with your API credentials." -ForegroundColor Yellow
     }
 
-    # Start Flask server in the background
-    Write-Host "Starting Flask server..." -ForegroundColor Cyan
-    $env:FLASK_APP = "app.py"
-    $flaskProcess = Start-Process -FilePath $PYTHON_CMD -ArgumentList "app.py" -PassThru -WindowStyle Hidden
-    
-    if (-not $flaskProcess) {
-        Write-Host "Error: Failed to start Flask server." -ForegroundColor Red
-        exit 1
-    }
+    # Start backend
+    Write-Host "Starting backend server..." -ForegroundColor Green
+    Start-Process -FilePath "cmd" -ArgumentList "/k", "venv\Scripts\activate.bat && python app.py" -WindowStyle Normal
+    $backendProcess = $true
 
-    # Wait for Flask to start
-    Write-Host "Waiting for Flask server to start..." -ForegroundColor Cyan
-    $maxAttempts = 10
-    $attempt = 0
-    $flaskReady = $false
-    
-    while ($attempt -lt $maxAttempts -and -not $flaskReady) {
-        Start-Sleep -Seconds 2
-        try {
-            $response = Invoke-WebRequest -Uri "http://localhost:5001" -TimeoutSec 5 -ErrorAction SilentlyContinue
-            $flaskReady = $true
-            Write-Host "Flask server is ready!" -ForegroundColor Green
-        } catch {
-            $attempt++
-            Write-Host "Waiting for Flask server... (attempt $attempt/$maxAttempts)" -ForegroundColor Yellow
+    # Wait for backend to start
+    Write-Host "Waiting for backend to start..." -ForegroundColor Cyan
+    Start-Sleep -Seconds 8
+
+    # Check if backend is running
+    Write-Host "Checking if backend is running..." -ForegroundColor Cyan
+    try {
+        $response = Invoke-WebRequest -Uri "http://localhost:5003/health" -TimeoutSec 5 -ErrorAction SilentlyContinue
+        if ($response.StatusCode -eq 200) {
+            Write-Host "✅ Backend is running successfully!" -ForegroundColor Green
+        } else {
+            Write-Host "⚠️ Backend may not be running properly. Status: $($response.StatusCode)" -ForegroundColor Yellow
         }
-    }
-
-    if (-not $flaskReady) {
-        Write-Host "Warning: Flask server may not be ready yet, but continuing..." -ForegroundColor Yellow
+    } catch {
+        Write-Host "⚠️ Backend may not be running properly. Please check the backend window for errors." -ForegroundColor Yellow
     }
 
     # Setup and run frontend
-    Write-Host ""
     Write-Host "Setting up frontend..." -ForegroundColor Yellow
     Set-Location -Path "..\frontend" -ErrorAction Stop
 
-    # Install dependencies if node_modules doesn't exist
-    if (-not (Test-Path -Path "node_modules")) {
+    # Install dependencies if needed
+    if (-not (Test-Path "node_modules")) {
         Write-Host "Installing frontend dependencies..." -ForegroundColor Cyan
         npm install
         if ($LASTEXITCODE -ne 0) {
@@ -150,50 +137,40 @@ try {
         }
     }
 
-    # Start React development server
-    Write-Host "Starting React development server..." -ForegroundColor Cyan
-    $reactProcess = Start-Process -FilePath "npm" -ArgumentList "start" -PassThru -WindowStyle Hidden
+    # Start frontend
+    Write-Host "Starting frontend server..." -ForegroundColor Green
+    Start-Process -FilePath "cmd" -ArgumentList "/k", "npm start" -WindowStyle Normal
+    $frontendProcess = $true
 
-    if (-not $reactProcess) {
-        Write-Host "Error: Failed to start React development server." -ForegroundColor Red
-        exit 1
-    }
+    # Wait for frontend to start
+    Write-Host "Waiting for frontend to start..." -ForegroundColor Cyan
+    Start-Sleep -Seconds 10
 
-    # Wait for React to start
-    Write-Host "Waiting for React development server to start..." -ForegroundColor Cyan
-    Start-Sleep -Seconds 5
+    # Return to original location
+    Set-Location -Path $originalLocation
 
-    # Display information
+    # Success message
     Write-Host ""
-    Write-Host "Application is running!" -ForegroundColor Green
-    Write-Host "- Backend API: http://localhost:5001" -ForegroundColor Cyan
-    Write-Host "- Frontend App: http://localhost:3000" -ForegroundColor Cyan
+    Write-Host "=== Application is running! ===" -ForegroundColor Green
+    Write-Host "- Backend API: http://localhost:5003" -ForegroundColor Cyan
+    Write-Host "- Frontend: http://localhost:3000" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "The application should open automatically in your browser." -ForegroundColor Yellow
-    Write-Host "If not, please open http://localhost:3000 manually." -ForegroundColor Yellow
+    Write-Host "Open http://localhost:3000 in your browser" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "Press Ctrl+C to stop the application" -ForegroundColor Magenta
+    Write-Host "Press Ctrl+C to stop the application..." -ForegroundColor Yellow
 
-    # Keep the script running until user presses Ctrl+C
-    try {
-        while ($true) {
-            Start-Sleep -Seconds 1
-        }
-    } catch [System.Management.Automation.PipelineStoppedException] {
-        # This is expected when Ctrl+C is pressed
-        Write-Host ""
-        Write-Host "Shutting down..." -ForegroundColor Yellow
+    # Keep the script running
+    while ($true) {
+        Start-Sleep -Seconds 1
     }
 
 } catch {
-    Write-Host "An error occurred: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 } finally {
-    # Return to original location
-    Set-Location $originalLocation
-    
-    # Stop background processes
+    # Cleanup
+    Write-Host ""
+    Write-Host "Stopping application..." -ForegroundColor Yellow
     Stop-BackgroundProcesses
-    
-    Write-Host "Application stopped." -ForegroundColor Green
+    Set-Location -Path $originalLocation
 }
